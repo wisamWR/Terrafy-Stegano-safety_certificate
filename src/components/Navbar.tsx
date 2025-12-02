@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Bell, Menu, Settings, User, ShieldCheck, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,9 +38,13 @@ export function Navbar() {
             <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-8">
                 {/* Logo Section */}
                 <div className="flex items-center gap-2">
-                    {/* Placeholder for Logo - Replace with <Image> when file is available */}
-                    <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">
-                        T
+                    <div className="relative h-10 w-10">
+                        <Image
+                            src="/logo.png"
+                            alt="Terrafy Logo"
+                            fill
+                            className="object-contain"
+                        />
                     </div>
                     <span className="text-xl font-bold text-blue-600">Terrafy</span>
                 </div>
@@ -133,8 +138,13 @@ export function Navbar() {
                                     {/* Header */}
                                     <SheetHeader className="p-6 border-b">
                                         <SheetTitle className="flex items-center gap-3 text-blue-600 font-bold text-left text-xl">
-                                            <div className="h-10 w-10 rounded-full bg-blue-600 flex items-center justify-center text-white shadow-md">
-                                                T
+                                            <div className="relative h-10 w-10">
+                                                <Image
+                                                    src="/logo.png"
+                                                    alt="Terrafy Logo"
+                                                    fill
+                                                    className="object-contain"
+                                                />
                                             </div>
                                             Terrafy
                                         </SheetTitle>
