@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Menu, Settings, User, ShieldCheck, Home } from "lucide-react";
+import { Bell, Menu, Settings, User, ShieldCheck, Home, Clock, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     Sheet,
@@ -70,6 +70,79 @@ export function Navbar() {
         { name: "Pengaturan", href: "/pengaturan", icon: Settings },
     ];
 
+    type NotificationStatus = 'incoming' | 'pending' | 'accepted' | 'rejected';
+
+    interface Notification {
+        id: string;
+        status: NotificationStatus;
+        title: string;
+        message: string;
+        timestamp: Date;
+        detailLink: string;
+    }
+
+    const [notifications, setNotifications] = useState<Notification[]>([
+        {
+            id: '1',
+            status: 'incoming',
+            title: 'Sertifikat Menunggu Verifikasi',
+            message: 'Permintaan sertifikat baru #S-001 perlu ditinjau.',
+            timestamp: new Date(new Date().getTime() - 1000 * 60 * 30), // 30 mins ago
+            detailLink: '/sertifikat/detail/1'
+        },
+        {
+            id: '2',
+            status: 'accepted',
+            title: 'Sertifikat Terverifikasi',
+            message: 'Sertifikat #S-002 telah disetujui.',
+            timestamp: new Date(new Date().getTime() - 1000 * 60 * 60 * 24), // 1 day ago
+            detailLink: '/sertifikat/detail/2'
+        },
+        {
+            id: '3',
+            status: 'rejected',
+            title: 'Sertifikat Ditolak',
+            message: 'Dokumen #S-003 tidak valid.',
+            timestamp: new Date(new Date().getTime() - 1000 * 60 * 60 * 48), // 2 days ago
+            detailLink: '/sertifikat/detail/3'
+        }
+    ]);
+
+    const handleAccept = (id: string) => {
+        setNotifications(prev => prev.map(n =>
+            n.id === id ? {
+                ...n,
+                status: 'pending' as NotificationStatus,
+                title: 'Menunggu Finalisasi',
+                message: 'Verifikasi awal berhasil. Menunggu persetujuan admin pusat.'
+            } : n
+        ));
+    };
+
+    const handleReject = (id: string) => {
+        setNotifications(prev => prev.map(n =>
+            n.id === id ? {
+                ...n,
+                status: 'rejected' as NotificationStatus,
+                title: 'Permintaan Ditolak',
+                message: 'Anda telah menolak permintaan sertifikat ini.'
+            } : n
+        ));
+    };
+
+    const formatDate = (date: Date) => {
+        return new Intl.DateTimeFormat('id-ID', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        }).format(date);
+    };
+
     return (
         <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-8">
@@ -109,28 +182,87 @@ export function Navbar() {
                         {/* Notifications */}
                         <Sheet open={isNotificationsOpen} onOpenChange={setIsNotificationsOpen}>
                             <SheetTrigger asChild>
-                                <Button variant="ghost" size="icon" className="relative">
+                                <Button variant="ghost" size="icon" className="relative cursor-pointer hover:bg-accent/10 transition-all duration-300 hover:scale-110 active:scale-95">
                                     <Bell className="h-5 w-5" />
                                     <span className="sr-only">Notifikasi</span>
                                     {/* Notification Dot Example */}
-                                    <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500" />
+                                    <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 animate-pulse" />
                                 </Button>
                             </SheetTrigger>
                             <SheetContent side="right" className="w-[300px] sm:w-[400px]">
                                 <SheetHeader>
                                     <SheetTitle>Notifikasi</SheetTitle>
                                 </SheetHeader>
-                                <div className="mt-4 flex flex-col gap-4">
-                                    <div className="rounded-lg border p-3 text-sm">
-                                        <p className="font-medium">Selamat Datang!</p>
-                                        <p className="text-muted-foreground">
-                                            Akun Anda berhasil dibuat. Silahkan lengkapi profil Anda.
-                                        </p>
-                                        <span className="text-xs text-muted-foreground mt-2 block">
-                                            Baru saja
-                                        </span>
-                                    </div>
-                                    {/* More notifications can go here */}
+                                <div className="mt-4 flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-120px)] pr-2">
+                                    {notifications.length > 0 ? (
+                                        notifications.map((notification) => (
+                                            <div key={notification.id} className="group flex flex-col gap-3 rounded-lg border p-4 bg-card text-card-foreground shadow-sm hover:shadow-md hover:bg-accent/5 transition-all duration-300 cursor-pointer hover:border-foreground/20">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="flex items-center gap-2">
+                                                        {(notification.status === 'incoming' || notification.status === 'pending') && <Clock className="h-4 w-4" />}
+                                                        {notification.status === 'accepted' && <CheckCircle2 className="h-4 w-4" />}
+                                                        {notification.status === 'rejected' && <XCircle className="h-4 w-4" />}
+                                                        <span className="text-sm font-semibold capitalize">
+                                                            {notification.status === 'incoming' ? 'Konfirmasi Diperlukan' :
+                                                                notification.status === 'pending' ? 'Menunggu Admin' :
+                                                                    notification.status === 'accepted' ? 'Diterima' : 'Ditolak'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-1">
+                                                    <p className="text-sm font-medium leading-none">{notification.title}</p>
+                                                    <p className="text-sm text-muted-foreground leading-relaxed">
+                                                        {notification.message}
+                                                    </p>
+                                                </div>
+
+                                                <div className="flex flex-col gap-2 pt-2 border-t mt-1">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px] text-muted-foreground font-mono">
+                                                            {formatDate(notification.timestamp).replace(/\./g, ':')}
+                                                        </span>
+                                                        <Button variant="link" className="h-auto p-0 text-xs text-foreground font-medium" asChild>
+                                                            <Link href={notification.detailLink}>
+                                                                Cek selengkapnya
+                                                            </Link>
+                                                        </Button>
+                                                    </div>
+
+                                                    {notification.status === 'incoming' && (
+                                                        <div className="flex gap-2 w-full mt-1">
+                                                            <Button
+                                                                size="sm"
+                                                                className="flex-1 h-8 text-xs cursor-pointer hover:scale-105 transition-all duration-200 shadow-sm"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleAccept(notification.id);
+                                                                }}
+                                                            >
+                                                                Terima
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                className="flex-1 h-8 text-xs cursor-pointer hover:bg-destructive/10 hover:border-destructive hover:text-destructive transition-all duration-200"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleReject(notification.id);
+                                                                }}
+                                                            >
+                                                                Tolak
+                                                            </Button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+                                            <Bell className="h-8 w-8 mb-2 opacity-20" />
+                                            <p className="text-sm">Tidak ada notifikasi saat ini</p>
+                                        </div>
+                                    )}
                                 </div>
                             </SheetContent>
                         </Sheet>
