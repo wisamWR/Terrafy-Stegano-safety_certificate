@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import {
@@ -40,6 +40,7 @@ export default function SettingsPage() {
   const [deleteConfirmation, setDeleteConfirmation] = useState("")
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const session = localStorage.getItem("auth_session")
@@ -68,7 +69,7 @@ export default function SettingsPage() {
       const users = JSON.parse(localStorage.getItem("auth_users") || "[]")
       const updatedUsers = users.map((u: any) => {
         if (u.email === user.email) { // Identify by original email
-          return { ...u, name, email }
+          return { ...u, name, email, avatar: user.avatar }
         }
         return u
       })
@@ -108,6 +109,18 @@ export default function SettingsPage() {
       router.push("/login")
     } catch (error) {
       setMessage({ type: "error", text: "Gagal menghapus akun." })
+    }
+  }
+
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        const base64String = reader.result as string
+        setUser({ ...user, avatar: base64String })
+      }
+      reader.readAsDataURL(file)
     }
   }
 
@@ -213,17 +226,32 @@ export default function SettingsPage() {
                   <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
                     <div className="relative group">
                       <Avatar className="h-24 w-24 border-4 border-background shadow-md">
-                        <AvatarImage src="/placeholder-avatar.jpg" />
+                        <AvatarImage src={user.avatar || "/placeholder-avatar.jpg"} className="object-cover" />
                         <AvatarFallback className="text-2xl bg-primary/10 text-primary">{getInitials(name)}</AvatarFallback>
                       </Avatar>
-                      <div className="absolute bottom-0 right-0 bg-primary text-primary-foreground p-1.5 rounded-full cursor-pointer hover:bg-primary/90 transition-colors shadow-sm">
+                      <div
+                        className="absolute bottom-0 right-0 bg-primary text-primary-foreground p-1.5 rounded-full cursor-pointer hover:bg-primary/90 transition-colors shadow-sm"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
                         <Camera className="h-4 w-4" />
                       </div>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                      />
                     </div>
                     <div className="space-y-1">
                       <h4 className="text-lg font-medium">{name || "Pengguna"}</h4>
                       <p className="text-sm text-muted-foreground">{email || "user@example.com"}</p>
-                      <Button variant="outline" size="sm" className="mt-2 h-8">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 h-8"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
                         Ubah Foto
                       </Button>
                     </div>
