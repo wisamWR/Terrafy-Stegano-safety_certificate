@@ -3,8 +3,9 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Menu, Settings, User, ShieldCheck, Home, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { Bell, Menu, Settings, User, ShieldCheck, Home, Clock, CheckCircle2, XCircle, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { logoutUser } from "@/lib/actions/auth";
 import {
     Sheet,
     SheetContent,
@@ -28,30 +29,57 @@ export function Navbar() {
     const router = useRouter();
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
     const [user, setUser] = useState<any>(null);
+    const [notifications, setNotifications] = useState<any[]>([]);
+
+    // Fetch notifications
+    const loadNotifications = async (userId: string) => {
+        try {
+            const { getUserNotifications } = await import("@/lib/actions/certificates");
+            const result = await getUserNotifications(userId);
+            if (result.success && result.notifications) {
+                console.log(`[NAVBAR] SUCCESS: Loaded ${result.notifications.length} notifications`);
+                setNotifications(result.notifications);
+            } else {
+                console.log(`[NAVBAR] EMPTY OR FAILED:`, result);
+            }
+        } catch (e) {
+            console.error("[NAVBAR] ERROR fetching notifications:", e);
+        }
+    };
 
     useEffect(() => {
-        const checkSession = () => {
+        const load = async () => {
             const session = localStorage.getItem("auth_session");
             if (session) {
-                setUser(JSON.parse(session));
+                const userData = JSON.parse(session);
+                setUser(userData);
+                await loadNotifications(userData.id);
             } else {
                 setUser(null);
+                setNotifications([]);
             }
         };
 
-        checkSession();
+        load();
 
-        window.addEventListener("auth-change", checkSession);
-        return () => window.removeEventListener("auth-change", checkSession);
+        window.addEventListener("auth-change", load);
+        window.addEventListener("refresh-notifications", load);
+        // Optional: Poll every 30s
+        const interval = setInterval(load, 30000);
+        return () => {
+            window.removeEventListener("auth-change", load);
+            window.removeEventListener("refresh-notifications", load);
+            clearInterval(interval);
+        };
     }, []);
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
+        await logoutUser();
         localStorage.removeItem("auth_session");
-        document.cookie = "user_session=; path=/; max-age=0"; // Clear cookie
         setUser(null);
         window.dispatchEvent(new Event("auth-change"));
         router.push("/login");
-        router.refresh(); // Force refresh to trigger middleware
+        router.refresh();
     };
 
     const getInitials = (name: string) => {
@@ -71,85 +99,57 @@ export function Navbar() {
         { name: "Pengaturan", href: "/pengaturan", icon: Settings },
     ];
 
-    type NotificationStatus = 'incoming' | 'pending' | 'accepted' | 'rejected';
+    const handleMarkRead = async (id: string, link?: string) => {
+        // Optimistic update
+        setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
 
-    interface Notification {
-        id: string;
-        status: NotificationStatus;
-        title: string;
-        message: string;
-        timestamp: Date;
-        detailLink: string;
-    }
-
-    const [notifications, setNotifications] = useState<Notification[]>([
-        {
-            id: '1',
-            status: 'incoming',
-            title: 'Menunggu Konfirmasi',
-            message: 'Budi Santoso mengajukan transfer',
-            timestamp: new Date(new Date().getTime() - 1000 * 60 * 30), // 30 mins ago
-            detailLink: '/sertifikat/detail/TRX-002' // Updated: Link to t2 (Hibah)
-        },
-        {
-            id: '2',
-            status: 'accepted',
-            title: 'Verifikasi Admin',
-            message: 'Admin menyetujui perpindahan hak',
-            timestamp: new Date(new Date().getTime() - 1000 * 60 * 60 * 24), // 1 day ago
-            detailLink: '/sertifikat/detail/TRX-001' // Updated: Link to t1 (Jual Beli)
-        },
-        {
-            id: '3',
-            status: 'rejected',
-            title: 'Ditolak',
-            message: 'Dokumen pendukung kurang lengkap',
-            timestamp: new Date(new Date().getTime() - 1000 * 60 * 60 * 48), // 2 days ago
-            detailLink: '/sertifikat/detail/TRX-003' // Updated: Link to t3 (Rejected)
+        try {
+            const { markNotificationAsRead } = await import("@/lib/actions/certificates");
+            await markNotificationAsRead(id);
+        } catch (e) {
+            console.error(e);
         }
-    ]);
 
-    const handleAccept = (id: string) => {
-        setNotifications(prev => prev.map(n =>
-            n.id === id ? {
-                ...n,
-                status: 'pending' as NotificationStatus,
-                title: 'Menunggu Verifikasi Admin',
-                message: 'Menunggu verifikasi admin BPN'
-            } : n
-        ));
+        if (link) {
+            router.push(link);
+            setIsNotificationsOpen(false);
+        }
     };
 
-    const handleReject = (id: string) => {
-        setNotifications(prev => prev.map(n =>
-            n.id === id ? {
-                ...n,
-                status: 'rejected' as NotificationStatus,
-                title: 'Ditolak',
-                message: 'Anda menolak pengajuan ini'
-            } : n
-        ));
+    const handleMarkAllRead = async () => {
+        if (notifications.length === 0) return;
+
+        // Optimistic update
+        setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+
+        try {
+            const { markAllNotificationsAsRead } = await import("@/lib/actions/certificates");
+            await markAllNotificationsAsRead(user.id);
+        } catch (e) {
+            console.error(e);
+        }
     };
 
-    const formatDate = (date: Date) => {
-        return new Intl.DateTimeFormat('id-ID', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        }).format(date);
+    const getIcon = (type: string) => {
+        switch (type) {
+            case 'CERTIFICATE_VERIFIED': return <div className="bg-emerald-500 p-1 rounded-md shadow-sm border border-emerald-400/50"><CheckCircle2 className="h-3.5 w-3.5 text-white" /></div>;
+            case 'CERTIFICATE_REJECTED': return <div className="bg-red-500 p-1 rounded-md shadow-sm border border-red-400/50"><XCircle className="h-3.5 w-3.5 text-white" /></div>;
+            case 'CERTIFICATE_PENDING': return <div className="bg-amber-500 p-1 rounded-md shadow-sm border border-amber-400/50"><Clock className="h-3.5 w-3.5 text-white" /></div>;
+            case 'TRANSFER_REQUEST': return <div className="bg-blue-500 p-1 rounded-md shadow-sm border border-blue-400/50"><Send className="h-3.5 w-3.5 text-white" /></div>;
+            default: return <div className="bg-slate-500 p-1 rounded-md shadow-sm border border-slate-400/50"><Bell className="h-3.5 w-3.5 text-white" /></div>;
+        }
     };
+
+    const unreadCount = notifications.filter(n => !n.isRead).length;
+
+    console.log(`[NAVBAR] Rendering for user: ${user?.email} (ID: ${user?.id}). Unread: ${unreadCount}`);
 
     return (
-        <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <nav className="sticky top-0 z-50 w-full glass-card border-b border-white/20 shadow-glass">
             <div className="container mx-auto flex h-16 items-center justify-between px-4 md:px-8">
                 {/* Logo Section */}
-                <div className="flex items-center gap-2">
-                    <div className="relative h-10 w-10">
+                <Link href="/" className="flex items-center gap-2 group">
+                    <div className="relative h-10 w-10 transition-transform group-hover:scale-110">
                         <Image
                             src="/logo.png"
                             alt="Terrafy Logo"
@@ -157,8 +157,8 @@ export function Navbar() {
                             className="object-contain"
                         />
                     </div>
-                    <span className="text-xl font-bold text-blue-600">Terrafy</span>
-                </div>
+                    <span className="text-xl font-bold text-gradient-primary">Terrafy</span>
+                </Link>
 
                 {/* Right Side Group (Nav + Actions) */}
                 <div className="flex items-center gap-6">
@@ -186,82 +186,92 @@ export function Navbar() {
                                 <Button variant="ghost" size="icon" className="relative cursor-pointer hover:bg-accent/10 transition-all duration-300 hover:scale-110 active:scale-95">
                                     <Bell className="h-5 w-5" />
                                     <span className="sr-only">Notifikasi</span>
-                                    {/* Notification Dot Example */}
-                                    <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                                    {unreadCount > 0 && (
+                                        <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                                    )}
                                 </Button>
                             </SheetTrigger>
-                            <SheetContent side="right" className="w-[300px] sm:w-[400px]">
-                                <SheetHeader>
-                                    <SheetTitle>Notifikasi</SheetTitle>
+                            <SheetContent side="right" className="w-[300px] sm:w-[400px] p-0 border-l border-white/20 bg-white/40 backdrop-blur-2xl">
+                                <SheetHeader className="p-6 border-b border-white/20 bg-white/30">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="bg-blue-600 p-2 rounded-xl shadow-lg">
+                                                <Bell className="h-5 w-5 text-white" />
+                                            </div>
+                                            <SheetTitle className="text-xl font-bold">Notifikasi</SheetTitle>
+                                        </div>
+                                        {unreadCount > 0 && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="text-[10px] uppercase font-bold tracking-widest text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 h-7"
+                                                onClick={handleMarkAllRead}
+                                            >
+                                                Tandai Semua Selesai
+                                            </Button>
+                                        )}
+                                    </div>
                                 </SheetHeader>
-                                <div className="mt-4 flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-120px)] pr-2">
+                                <div className="flex flex-col gap-3 p-4 overflow-y-auto max-h-[calc(100vh-80px)] custom-scrollbar">
                                     {notifications.length > 0 ? (
                                         notifications.map((notification) => (
-                                            <div key={notification.id} className="group flex flex-col gap-3 rounded-lg border p-4 bg-card text-card-foreground shadow-sm hover:shadow-md hover:bg-accent/5 transition-all duration-300 cursor-pointer hover:border-foreground/20">
+                                            <div
+                                                key={notification.id}
+                                                className={`group flex flex-col gap-3 rounded-2xl border p-4 shadow-sm transition-all duration-300 cursor-pointer active:scale-95 ${notification.isRead
+                                                    ? 'bg-white/30 border-white/40 opacity-70 grayscale-[0.3]'
+                                                    : 'bg-white/80 border-blue-200/50 shadow-blue-500/5 ring-1 ring-blue-500/5'
+                                                    } hover:shadow-md hover:border-blue-400/30 hover:bg-white/90`}
+                                                onClick={() => handleMarkRead(notification.id, notification.certificateId ? `/sertifikat/${notification.certificateId}` : undefined)}
+                                            >
                                                 <div className="flex items-start justify-between gap-2">
-                                                    <div className="flex items-center gap-2">
-                                                        {(notification.status === 'incoming' || notification.status === 'pending') && <Clock className="h-4 w-4" />}
-                                                        {notification.status === 'accepted' && <CheckCircle2 className="h-4 w-4" />}
-                                                        {notification.status === 'rejected' && <XCircle className="h-4 w-4" />}
-                                                        <span className="text-sm font-semibold capitalize">
-                                                            {notification.status === 'incoming' ? 'Menunggu Konfirmasi' :
-                                                                notification.status === 'pending' ? 'Menunggu Verifikasi Admin' :
-                                                                    notification.status === 'accepted' ? 'Verifikasi Admin' : 'Ditolak'}
+                                                    <div className="flex items-center gap-2.5">
+                                                        {getIcon(notification.type)}
+                                                        <span className={`text-[10px] font-bold uppercase tracking-widest ${notification.type === 'CERTIFICATE_VERIFIED' ? 'text-emerald-700' :
+                                                            notification.type === 'CERTIFICATE_REJECTED' ? 'text-red-700' :
+                                                                notification.type === 'CERTIFICATE_PENDING' ? 'text-amber-700' :
+                                                                    notification.type === 'TRANSFER_REQUEST' ? 'text-blue-700' : 'text-slate-700'
+                                                            }`}>
+                                                            {notification.type === 'CERTIFICATE_VERIFIED' ? 'Terverifikasi' :
+                                                                notification.type === 'CERTIFICATE_REJECTED' ? 'Ditolak' :
+                                                                    notification.type === 'CERTIFICATE_PENDING' ? 'Dalam Proses' :
+                                                                        notification.type === 'TRANSFER_REQUEST' ? 'Permohonan Transfer' : 'Informasi'}
                                                         </span>
                                                     </div>
+                                                    {!notification.isRead && (
+                                                        <div className="relative flex h-2 w-2">
+                                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 <div className="space-y-1">
-                                                    <p className="text-sm font-medium leading-none">{notification.title}</p>
-                                                    <p className="text-sm text-muted-foreground leading-relaxed">
+                                                    <p className={`text-sm font-bold leading-tight ${notification.isRead ? 'text-slate-600' : 'text-slate-900'}`}>{notification.title}</p>
+                                                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
                                                         {notification.message}
                                                     </p>
                                                 </div>
 
-                                                <div className="flex flex-col gap-2 pt-2 border-t mt-1">
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-[10px] text-muted-foreground font-mono">
-                                                            {formatDate(notification.timestamp).replace(/\./g, ':')}
-                                                        </span>
-                                                        <Button variant="link" className="h-auto p-0 text-xs text-foreground font-medium" asChild>
-                                                            <Link href={notification.detailLink}>
-                                                                Cek selengkapnya
-                                                            </Link>
-                                                        </Button>
+                                                <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-100/50">
+                                                    <div className="flex items-center gap-1.5 text-[9px] text-slate-400 font-bold uppercase tracking-tighter">
+                                                        <Clock className="h-3 w-3" />
+                                                        {new Date(notification.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                                     </div>
-
-                                                    {notification.status === 'incoming' && (
-                                                        <div className="flex gap-2 w-full mt-1">
-                                                            <Button
-                                                                size="sm"
-                                                                className="flex-1 h-8 text-xs cursor-pointer hover:scale-105 transition-all duration-200 shadow-sm"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleAccept(notification.id);
-                                                                }}
-                                                            >
-                                                                Terima
-                                                            </Button>
-                                                            <Button
-                                                                size="sm"
-                                                                variant="outline"
-                                                                className="flex-1 h-8 text-xs cursor-pointer hover:bg-destructive/10 hover:border-destructive hover:text-destructive transition-all duration-200"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleReject(notification.id);
-                                                                }}
-                                                            >
-                                                                Tolak
-                                                            </Button>
-                                                        </div>
+                                                    {notification.certificateId && (
+                                                        <span className="text-[10px] text-blue-600 font-bold uppercase tracking-widest group-hover:translate-x-1 transition-transform">
+                                                            Detail →
+                                                        </span>
                                                     )}
                                                 </div>
                                             </div>
                                         ))
                                     ) : (
-                                        <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-                                            <Bell className="h-8 w-8 mb-2 opacity-20" />
-                                            <p className="text-sm">Tidak ada notifikasi saat ini</p>
+                                        <div className="flex flex-col items-center justify-center py-20 text-center">
+                                            <div className="bg-slate-100 p-6 rounded-full mb-4 opacity-50 ring-8 ring-slate-50">
+                                                <Bell className="h-10 w-10 text-slate-400" />
+                                            </div>
+                                            <h3 className="text-base font-bold text-slate-600">Aliran Sepi</h3>
+                                            <p className="text-xs text-slate-400 mt-1 max-w-[200px]">Belum ada kegiatan penting yang perlu kami sampaikan.</p>
                                         </div>
                                     )}
                                 </div>

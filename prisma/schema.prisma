@@ -1,0 +1,167 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+model User {
+  id              String           @id @default(cuid())
+  email           String           @unique
+  password        String
+  name            String?
+  role            Role             @default(USER)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  certificates    Certificate[]
+  notifications   Notification[]
+  adminAuditLogs  AdminAuditLog[]
+}
+
+enum Role {
+  USER
+  ADMIN
+  DINAS
+}
+
+model Certificate {
+  id                      String                    @id @default(cuid())
+  nomor_sertifikat        String                    @unique @db.VarChar(50)
+  nama_lahan              String                    @db.VarChar(200)
+  luas_tanah              String                    @db.VarChar(50)
+  lokasi                  String                    @db.VarChar(500)
+  status                  Status                    @default(PENDING)
+  
+  // Existing fields
+  image_url               String?
+  stego_key               String?
+  keterangan              String?                   @db.Text
+  
+  // Priority 1 - Critical fields
+  issueDate               DateTime                  @default(now())
+  verifiedBy              String?
+  verifiedAt              DateTime?
+  rejectedBy              String?
+  rejectedAt              DateTime?
+  rejectionReason         String?                   @db.Text
+
+  // Transfer Info
+  transferToEmail         String?                   @db.VarChar(255)
+  
+  // Priority 2 - Steganography & Additional fields
+  encryptedData           String?                   @db.Text
+  stegoImageUrl           String?
+  
+  // Relations
+  owner                   User                      @relation(fields: [ownerId], references: [id])
+  ownerId                 String
+  history                 History[]
+  notifications           Notification[]
+  steganographyMetadata   SteganographyMetadata?
+  
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  
+  // Priority 3 - Indexes for performance
+  @@index([ownerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([nomor_sertifikat])
+}
+
+enum Status {
+  PENDING
+  VERIFIED
+  REJECTED
+  TRANSFER_PENDING
+  AWAITING_RECIPIENT
+}
+
+model History {
+  id            String      @id @default(cuid())
+  certificate   Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  certificateId String
+  actor_name    String
+  actor_email   String?
+  action        String      // Misal: "Pendaftaran", "Verifikasi", "Pengalihan Hak"
+  note          String?     @db.Text
+  owner_name    String?     @db.VarChar(200)
+  owner_email   String?     @db.VarChar(200)
+  createdAt     DateTime    @default(now())
+  
+  @@index([certificateId])
+  @@index([createdAt])
+}
+
+// Priority 2 - New Model: Steganography Metadata
+model SteganographyMetadata {
+  id              String      @id @default(cuid())
+  certificateId   String      @unique
+  certificate     Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  
+  // Metadata Steganografi
+  algorithm       String      @db.VarChar(50)  // LSB, DCT, DWT, etc.
+  encryptionKey   String      // Key untuk enkripsi (hashed)
+  originalImage   String?     @db.VarChar(500)
+  stegoImage      String      @db.VarChar(500)
+  
+  // Metadata Kriptografi
+  encryptionAlgo  String?     @db.VarChar(50)  // AES, RSA, etc.
+  hashValue       String?     @db.VarChar(128) // Hash untuk verifikasi integritas
+  
+  // Audit Trail
+  createdBy       String
+  createdAt       DateTime    @default(now())
+  lastVerified    DateTime?
+  
+  @@index([certificateId])
+}
+
+// Priority 2 - New Model: Notification
+model Notification {
+  id              String            @id @default(cuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  certificateId   String?
+  certificate     Certificate?      @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  
+  title           String            @db.VarChar(200)
+  message         String            @db.Text
+  type            NotificationType
+  isRead          Boolean           @default(false)
+  
+  createdAt       DateTime          @default(now())
+  
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  CERTIFICATE_VERIFIED
+  CERTIFICATE_REJECTED
+  CERTIFICATE_PENDING
+  TRANSFER_REQUEST
+  SYSTEM_ALERT
+}
+
+// Priority 2 - New Model: Admin Audit Log
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  adminId     String
+  admin       User     @relation(fields: [adminId], references: [id])
+  
+  action      String   @db.VarChar(100)  // LOGIN, APPROVE_CERT, REJECT_CERT, etc.
+  targetType  String?  @db.VarChar(50)   // Certificate, User, etc.
+  targetId    String?
+  ipAddress   String?  @db.VarChar(45)   // IPv6 max length
+  userAgent   String?  @db.VarChar(500)
+  details     Json?                      // Flexible untuk data tambahan
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([adminId])
+  @@index([createdAt])
+}

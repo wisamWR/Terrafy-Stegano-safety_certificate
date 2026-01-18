@@ -1,36 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Web Kripto Steganografi Sertifikat 🛡️📜
 
-## Getting Started
+Sistem manajemen sertifikat digital berbasis web yang mengintegrasikan teknik **Kriptografi** dan **Steganografi** untuk menjamin keamanan, keaslian, dan integritas data sertifikat. Proyek ini dikembangkan sebagai tugas akhir untuk memfasilitasi pengelolaan sertifikat tanah/sawah secara digital dengan perlindungan data berlapis.
 
-First, run the development server:
+## 🌟 Fitur Utama
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Pendaftaran Sertifikat**: Pengguna dapat mengajukan sertifikat tanah/sawah dengan detail lokasi (koordinat), luas, dan nomor sertifikat.
+- **Steganografi LSB (Least Significant Bit)**: Menyembunyikan metadata autentikasi ke dalam citra sertifikat (PNG) tanpa merusak kualitas visual secara signifikan.
+- **Verifikasi Keaslian**: Fitur verifikasi mandiri dengan mengunggah sertifikat untuk mengekstraksi pesan tersembunyi dan memvalidasi integritasnya.
+- **Pengalihan Hak (Transfer)**: Mekanisme transfer kepemilikan sertifikat yang aman antar pengguna dengan persetujuan admin.
+- **Riwayat Kepemilikan (History)**: Pencatatan otomatis setiap aksi (Pendaftaran, Verifikasi, Pengalihan) untuk audit trail yang transparan.
+- **Sistem Notifikasi**: Pemberitahuan real-time untuk status verifikasi, penolakan, atau permintaan transfer.
+- **Multi-Role User**:
+  - **User**: Mengelola sertifikat pribadi, verifikasi, dan transfer.
+  - **Admin**: Menyetujui pendaftaran, memantau statistik, dan mengelola audit log.
+  - **Dinas**: Akses pengawasan dan pelaporan (Optional/Extended).
+
+## 🛠️ Teknologi yang Digunakan
+
+### Frontend & UI
+- **Framework**: [Next.js 16](https://nextjs.org/) (App Router)
+- **Styling**: [Tailwind CSS 4](https://tailwindcss.com/)
+- **Animasi**: [Framer Motion](https://www.framer.com/motion/)
+- **Komponen UI**: [Radix UI](https://www.radix-ui.com/) & [Lucide React](https://lucide.dev/)
+- **Chart**: [Recharts](https://recharts.org/)
+
+### Backend & Database
+- **Runtime**: Node.js & Next.js Server Actions
+- **ORM**: [Prisma](https://www.prisma.io/)
+- **Database**: PostgreSQL (Supabase/Local)
+- **Authentication**: Bcrypt.js (Password Hashing)
+
+### Keamanan (Kriptografi & Steganografi)
+- **PNG Analysis**: [pngjs](https://www.npmjs.com/package/pngjs)
+- **Algoritma**: LSB (Least Significant Bit) untuk embedding data.
+- **Integritas**: Hash-based validation untuk memastikan data tidak dimanipulasi.
+
+## 📊 Skema Database
+
+Sistem ini menggunakan struktur data relasional untuk menjaga integritas informasi:
+
+```mermaid
+erDiagram
+    USER ||--o{ CERTIFICATE : owns
+    USER ||--o{ NOTIFICATION : receives
+    USER ||--o{ ADMIN_AUDIT_LOG : performs
+    CERTIFICATE ||--o{ HISTORY : "has history"
+    CERTIFICATE ||--o| STEGANOGRAPHY_METADATA : contains
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🚀 Instalasi & Persiapan
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **Clone Repositori**:
+   ```bash
+   git clone https://github.com/ridlofw/web-kripto-steganografi-sertifikat.git
+   cd web-kripto-steganografi-sertifikat
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. **Instal Dependensi**:
+   ```bash
+   npm install
+   ```
 
-## Learn More
+3. **Konfigurasi Environment**:
+   Buat file `.env` di root direktori dan sesuaikan parameter berikut:
+   ```env
+   DATABASE_URL="postgresql://user:password@localhost:5432/db_name?schema=public"
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+4. **Setup Database (Prisma)**:
+   ```bash
+   npx prisma generate
+   npx prisma db push
+   npm run seed # Opsional: Untuk data awal admin/user
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+5. **Jalankan Aplikasi**:
+   ```bash
+   npm run dev
+   ```
+   Akses di `http://localhost:3000`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 📖 Panduan Penggunaan
 
-## Deploy on Vercel
+1. **Registrasi/Login**: Masuk sebagai User atau Admin.
+2. **Pengajuan**: User mengunggah detail sertifikat. Sistem akan melakukan proses steganografi secara otomatis setelah disetujui Admin.
+3. **Verifikasi**: Di halaman Verifikasi, unggah file sertifikat PNG yang telah diunduh. Sistem akan mengekstrak metadata dan mencocokkan dengan database.
+4. **Transfer**: Masukkan email penerima untuk mengalihkan hak kepemilikan sertifikat.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 👥 Tim Pengembang
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Abid** - [GitHub](https://github.com/abidclassroomgit)
+- **Tim Project** - Kontributor
+
+---
+*Proyek ini merupakan bagian dari tugas akhir mata kuliah Kriptografi.*

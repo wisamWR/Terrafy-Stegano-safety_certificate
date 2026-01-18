@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { loginUser, registerUser } from "@/lib/actions/auth";
 
 
 interface User {
@@ -33,70 +34,52 @@ export default function AuthPage({ initialSignUp = false }: { initialSignUp?: bo
     setPassword("");
   };
 
-  const handleSignUp = (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
 
     if (!name || !email || !password) {
-      setMessage({ type: "error", text: "Please fill in all fields" });
+      setMessage({ type: "error", text: "Semua kolom harus diisi" });
       return;
     }
 
-    try {
-      const existingUsers = JSON.parse(localStorage.getItem("auth_users") || "[]");
-      const userExists = existingUsers.some((u: User) => u.email === email);
+    const result = await registerUser({ name, email, password });
 
-      if (userExists) {
-        setMessage({ type: "error", text: "Email already registered" });
-        return;
-      }
-
-      const newUser = { name, email, password };
-      localStorage.setItem("auth_users", JSON.stringify([...existingUsers, newUser]));
-
-      setMessage({ type: "success", text: "Account created! Please sign in." });
+    if (result?.error) {
+      setMessage({ type: "error", text: result.error });
+    } else if (result?.success) {
+      setMessage({ type: "success", text: "Akun berhasil dibuat! Silakan masuk." });
       setTimeout(() => {
         toggleMode();
       }, 1500);
-    } catch {
-      setMessage({ type: "error", text: "Failed to register" });
     }
   };
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
 
     if (!email || !password) {
-      setMessage({ type: "error", text: "Please fill in all fields" });
+      setMessage({ type: "error", text: "Email dan password harus diisi" });
       return;
     }
 
-    try {
-      // Hardcoded check for requested dummy user
-      const isDummyUser = email === "user@terafy.com" && password === "user";
+    const result = await loginUser({ email, password });
 
-      const users = JSON.parse(localStorage.getItem("auth_users") || "[]");
-      const user = users.find((u: User) => u.email === email && u.password === password);
+    if (result?.error) {
+      setMessage({ type: "error", text: result.error });
+    } else if (result?.success) {
+      // Simpan di localStorage hanya untuk sinkronisasi Navbar/UI jika diperlukan
+      localStorage.setItem("auth_session", JSON.stringify(result.user));
 
-      if (user || isDummyUser) {
-        const sessionUser = user || { name: "User Terafy", email: "user@terafy.com" };
+      // Dispatch custom event for Navbar update
+      window.dispatchEvent(new Event("auth-change"));
 
-        localStorage.setItem("auth_session", JSON.stringify(sessionUser));
-        document.cookie = "user_session=true; path=/"; // Set cookie for middleware
-
-        // Dispatch custom event for Navbar update
-        window.dispatchEvent(new Event("auth-change"));
-
-        setMessage({ type: "success", text: "Login successful! Redirecting..." });
-        setTimeout(() => {
-          router.push("/");
-        }, 1000);
-      } else {
-        setMessage({ type: "error", text: "Invalid email or password" });
-      }
-    } catch {
-      setMessage({ type: "error", text: "Failed to login" });
+      setMessage({ type: "success", text: "Login berhasil! Mengalihkan..." });
+      setTimeout(() => {
+        router.push("/");
+        router.refresh(); // Refresh to update server-side state
+      }, 1000);
     }
   };
 

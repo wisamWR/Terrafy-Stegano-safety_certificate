@@ -30,8 +30,8 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-
-import { DUMMY_CERTIFICATES } from "@/lib/dummy-data";
+import { getUserCertificates } from "@/lib/actions/certificates";
+import { useEffect } from "react";
 
 // Type definitions
 type SortOption = "newest" | "oldest" | "az" | "za";
@@ -42,24 +42,32 @@ export default function CertificateListPage() {
     const [sortOption, setSortOption] = useState<SortOption>("newest");
     const [itemsPerPage, setItemsPerPage] = useState("12");
     const [currentPage, setCurrentPage] = useState(1);
+    const [certificates, setCertificates] = useState<any[]>([]);
 
-    // Initial Data Mapping
-    const mappedCertificates = useMemo(() => {
-        return DUMMY_CERTIFICATES.map(c => ({
-            id: c.id,
-            title: c.nama,
-            nomor: c.nomor,
-            subtitle: c.keterangan,
-            address: c.location,
-            luas: c.luas,
-            tanggal: c.uploadDate,
-            rawDate: new Date(c.uploadDate), // Assuming format is parseable or needs parsing logic
-        }));
+    useEffect(() => {
+        const load = async () => {
+            const result = await getUserCertificates();
+            if (result.success && result.certificates) {
+                const mapped = result.certificates.map((c: any) => ({
+                    id: c.id,
+                    title: c.nama_lahan,
+                    nomor: c.nomor_sertifikat,
+                    subtitle: c.keterangan || "Sertifikat Digital",
+                    address: c.lokasi,
+                    luas: c.luas_tanah,
+                    tanggal: new Date(c.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+                    rawDate: new Date(c.createdAt),
+                    status: c.status,
+                }));
+                setCertificates(mapped);
+            }
+        };
+        load();
     }, []);
 
     // Filter & Sort Logic
     const filteredData = useMemo(() => {
-        let result = [...mappedCertificates];
+        let result = [...certificates];
 
         // 1. Search
         if (searchTerm) {
@@ -75,10 +83,9 @@ export default function CertificateListPage() {
         result.sort((a, b) => {
             switch (sortOption) {
                 case "newest":
-                    // Fallback comparison if date parsing fails/is complex string
-                    return new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime();
+                    return b.rawDate.getTime() - a.rawDate.getTime();
                 case "oldest":
-                    return new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime();
+                    return a.rawDate.getTime() - b.rawDate.getTime();
                 case "az":
                     return a.title.localeCompare(b.title);
                 case "za":
@@ -89,7 +96,7 @@ export default function CertificateListPage() {
         });
 
         return result;
-    }, [mappedCertificates, searchTerm, sortOption]);
+    }, [certificates, searchTerm, sortOption]);
 
     // Pagination Logic
     const totalItems = filteredData.length;
@@ -147,7 +154,7 @@ export default function CertificateListPage() {
                             <FileText className="h-4 w-4 text-muted-foreground" />
                         </CardHeader>
                         <CardContent>
-                            <div className="text-2xl font-bold">{mappedCertificates.length}</div>
+                            <div className="text-2xl font-bold">{certificates.length}</div>
                             <p className="text-xs text-muted-foreground">
                                 Dokumen tersimpan
                             </p>
@@ -220,12 +227,17 @@ export default function CertificateListPage() {
                     <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                         {displayedData.map((c) => (
                             <Link key={c.id} href={`/sertifikat/${c.id}`}>
-                                <Card className="group h-full cursor-pointer border-zinc-200 bg-white transition-all hover:border-primary/50 hover:shadow-lg hover:-translate-y-1">
+                                <Card className={`group h-full cursor-pointer transition-all hover:shadow-lg hover:-translate-y-1 ${c.status === 'PENDING' ? 'border-amber-400 bg-amber-50/50' : 'border-zinc-200 bg-white hover:border-primary/50'}`}>
                                     <CardHeader className="space-y-1">
                                         <div className="flex items-start justify-between">
                                             <Badge variant="outline" className="mb-2 bg-zinc-50 text-zinc-600 border-zinc-200">
                                                 {c.nomor}
                                             </Badge>
+                                            {c.status === 'PENDING' && (
+                                                <Badge className="bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100">
+                                                    Pending
+                                                </Badge>
+                                            )}
                                         </div>
                                         <CardTitle className="text-lg font-bold text-zinc-900 truncate leading-tight">
                                             {c.title}

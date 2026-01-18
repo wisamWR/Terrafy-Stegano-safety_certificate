@@ -7,65 +7,20 @@ import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/ui/data-table";
 import { ColumnDef } from "@tanstack/react-table";
 
+import { useEffect, useState } from "react";
+import { getAllCertificates } from "@/lib/actions/certificates";
+
 // Type definition
 type Approval = {
     id: string;
     certNo: string;
-    sender: string;
-    receiver: string;
+    owner: string;
     type: string;
     date: string;
     status: string;
 };
 
-// Dummy data (Hardcoded as requested to not sync yet)
-const approvals: Approval[] = [
-    {
-        id: "TRX-001",
-        certNo: "111/SRTV/X/2024",
-        sender: "Budi Santoso",
-        receiver: "Ahmad Dahlan",
-        type: "Jual Beli",
-        date: "2024-12-10 13:45:00",
-        status: "Pending",
-    },
-    {
-        id: "TRX-002",
-        certNo: "112/SRTV/X/2024",
-        sender: "Siti Aminah",
-        receiver: "Yayasan Wakaf",
-        type: "Wakaf",
-        date: "2024-12-09 10:30:00",
-        status: "Pending",
-    },
-    {
-        id: "TRX-003",
-        certNo: "113/SRTV/X/2024",
-        sender: "Joko Widodo",
-        receiver: "Ma'ruf Amin",
-        type: "Hibah",
-        date: "2024-12-08 15:20:00",
-        status: "Pending",
-    },
-    {
-        id: "TRX-004",
-        certNo: "114/SRTV/X/2024",
-        sender: "Rina Nose",
-        receiver: "Andre Taulany",
-        type: "Jual Beli",
-        date: "2024-12-07 09:00:00",
-        status: "Pending",
-    },
-    {
-        id: "TRX-005",
-        certNo: "115/SRTV/X/2024",
-        sender: "Sule",
-        receiver: "Rizwan",
-        type: "Hibah",
-        date: "2024-12-06 14:15:00",
-        status: "Pending",
-    },
-];
+
 
 export const columns: ColumnDef<Approval>[] = [
     {
@@ -113,28 +68,14 @@ export const columns: ColumnDef<Approval>[] = [
         cell: ({ row }) => <span className="font-mono text-xs text-muted-foreground">{row.getValue("certNo")}</span>,
     },
     {
-        accessorKey: "sender",
+        accessorKey: "owner",
         header: ({ column }) => {
             return (
                 <Button
                     variant="ghost"
                     onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
                 >
-                    Pengirim
-                    <ArrowUpDown className="ml-2 h-4 w-4" />
-                </Button>
-            );
-        },
-    },
-    {
-        accessorKey: "receiver",
-        header: ({ column }) => {
-            return (
-                <Button
-                    variant="ghost"
-                    onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-                >
-                    Penerima
+                    Pemilik
                     <ArrowUpDown className="ml-2 h-4 w-4" />
                 </Button>
             );
@@ -174,12 +115,34 @@ export const columns: ColumnDef<Approval>[] = [
 ];
 
 export default function ApprovalPage() {
+    const [approvals, setApprovals] = useState<Approval[]>([]);
+
+    useEffect(() => {
+        const load = async () => {
+            const result = await getAllCertificates();
+            if (result.success && result.certificates) {
+                const mapped = result.certificates
+                    .filter((c: any) => c.status === "PENDING" || c.status === "TRANSFER_PENDING")
+                    .map((c: any) => ({
+                        id: c.id,
+                        certNo: c.nomor_sertifikat,
+                        owner: c.owner.name || c.owner.email || "User",
+                        type: c.status === "TRANSFER_PENDING" ? "Pengalihan Hak" : "Pendaftaran",
+                        date: new Date(c.createdAt).toLocaleString('id-ID'),
+                        status: c.status === "TRANSFER_PENDING" ? "Transfer" : "Pending",
+                    }));
+                setApprovals(mapped);
+            }
+        };
+        load();
+    }, []);
+
     return (
         <div className="space-y-6">
             <div className="space-y-1">
                 <h1 className="text-3xl font-bold tracking-tight">Daftar Persetujuan</h1>
                 <p className="text-muted-foreground">
-                    Kelola permintaan perpindahan sertifikat yang masuk dan memerlukan tindakan.
+                    Kelola permintaan pendaftaran sertifikat dan permohonan pengalihan hak yang memerlukan tindakan.
                 </p>
             </div>
 

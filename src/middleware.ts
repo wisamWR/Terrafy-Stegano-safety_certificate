@@ -3,47 +3,51 @@ import type { NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
     const path = request.nextUrl.pathname;
+    const sessionCookie = request.cookies.get("user_session");
+    const isUserLoggedIn = !!sessionCookie;
 
-    // --- ADMIN PROTECTION ---
-    if (path.startsWith("/admin")) {
-        const isAdminLoggedIn = request.cookies.get("admin_session");
-
-        if (path === "/admin") {
-            if (isAdminLoggedIn) {
-                return NextResponse.redirect(new URL("/admin/dashboard", request.url));
-            } else {
-                return NextResponse.redirect(new URL("/admin/login", request.url));
-            }
+    // Helper to get session data
+    let userRole = null;
+    try {
+        if (sessionCookie) {
+            const session = JSON.parse(sessionCookie.value);
+            userRole = session.role;
         }
+    } catch (e) { }
 
-        if (path !== "/admin/login" && !isAdminLoggedIn) {
-            return NextResponse.redirect(new URL("/admin/login", request.url));
-        }
-
-        if (path === "/admin/login" && isAdminLoggedIn) {
-            return NextResponse.redirect(new URL("/admin/dashboard", request.url));
-        }
-
-        return NextResponse.next();
-    }
-
-    // --- USER PROTECTION (Mandatory Login) ---
-    // Define public paths that don't satisfy the protection rule
+    // --- PUBLIC PATHS ---
     const isPublicPath =
         path === "/login" ||
         path === "/register" ||
+        path === "/admin/login" ||
         path.startsWith("/api") ||
         path.startsWith("/_next") ||
-        path.includes("."); // Catch-all for files (images, favicon, etc.)
+        path.includes(".");
 
-    const isUserLoggedIn = request.cookies.get("user_session");
+    // --- ADMIN PROTECTION ---
+    if (path.startsWith("/admin")) {
+        if (path === "/admin/login") {
+            if (isUserLoggedIn && userRole === "ADMIN") {
+                return NextResponse.redirect(new URL("/admin/dashboard", request.url));
+            }
+            return NextResponse.next();
+        }
 
+        if (!isUserLoggedIn || userRole !== "ADMIN") {
+            return NextResponse.redirect(new URL("/admin/login", request.url));
+        }
+    }
+
+    // --- USER PROTECTION ---
     if (!isUserLoggedIn && !isPublicPath) {
         return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    // Redirect to home if logged in and trying to access login/register
-    if (isUserLoggedIn && (path === "/login" || path === "/register")) {
+    // Redirect to dashboard/home if logged in and trying to access auth pages
+    if (isUserLoggedIn && (path === "/login" || path === "/register" || path === "/admin/login")) {
+        if (userRole === "ADMIN" && path.startsWith("/admin")) {
+            return NextResponse.redirect(new URL("/admin/dashboard", request.url));
+        }
         return NextResponse.redirect(new URL("/", request.url));
     }
 

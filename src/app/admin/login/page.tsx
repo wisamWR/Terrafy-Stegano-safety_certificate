@@ -7,13 +7,14 @@ import { Loader2, ShieldCheck, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { loginUser } from "@/lib/actions/auth";
 
 export default function AdminLoginPage() {
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState("");
     const [formData, setFormData] = useState({
-        username: "",
+        email: "",
         password: "",
     });
 
@@ -22,18 +23,25 @@ export default function AdminLoginPage() {
         setIsLoading(true);
         setError("");
 
-        // Simulate API call
-        setTimeout(() => {
-            if (formData.username === "admin" && formData.password === "admin") {
-                // Set dummy cookie
-                document.cookie = "admin_session=true; path=/; max-age=86400"; // 1 day
-                router.push("/admin/dashboard");
-                router.refresh(); // Refresh to let middleware know
-            } else {
-                setError("Username atau password salah");
+        const result = await loginUser(formData);
+
+        if (result?.error) {
+            setError(result.error);
+            setIsLoading(false);
+        } else if (result?.success) {
+            if (result.user.role !== "ADMIN") {
+                setError("Akses ditolak. Anda bukan Admin.");
                 setIsLoading(false);
+                return;
             }
-        }, 1500);
+
+            // Simpan di localStorage untuk UI consistency
+            localStorage.setItem("auth_session", JSON.stringify(result.user));
+            window.dispatchEvent(new Event("auth-change"));
+
+            router.push("/admin/dashboard");
+            router.refresh();
+        }
     };
 
     return (
@@ -53,14 +61,15 @@ export default function AdminLoginPage() {
                             </div>
                         )}
                         <div className="space-y-2">
-                            <Label htmlFor="username">Username</Label>
+                            <Label htmlFor="email">Email Admin</Label>
                             <div className="relative">
                                 <Input
-                                    id="username"
-                                    placeholder="admin"
+                                    id="email"
+                                    type="email"
+                                    placeholder="admin@bps.go.id"
                                     className="pl-8"
-                                    value={formData.username}
-                                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                                    value={formData.email}
+                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                                     required
                                 />
                                 <ShieldCheck className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
