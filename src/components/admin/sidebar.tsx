@@ -62,7 +62,7 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
         setOpenMenus(prev => ({ ...prev, [title]: !prev[title] }));
     };
 
-    const [user, setUser] = useState<{ name: string, email: string } | null>(null);
+    const [user, setUser] = useState<{ name: string, email: string, image?: string } | null>(null);
 
     useEffect(() => {
         getSession().then((session) => {
@@ -168,7 +168,7 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
                         >
                             <div className="flex items-center gap-3 overflow-hidden">
                                 <Avatar className="h-9 w-9 border">
-                                    <AvatarImage src="/placeholder-user.jpg" alt="Admin" />
+                                    <AvatarImage src={user?.image || "/placeholder-user.jpg"} alt="Admin" />
                                     <AvatarFallback>{user?.name ? user.name.substring(0, 2).toUpperCase() : "AD"}</AvatarFallback>
                                 </Avatar>
                                 <div className="flex flex-col items-start overflow-hidden">

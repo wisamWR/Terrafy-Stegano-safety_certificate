@@ -26,6 +26,7 @@ interface TransferModalProps {
 
 export function TransferModal({ certId, certName, currentUserEmail }: TransferModalProps) {
     const [email, setEmail] = useState("")
+    const [reason, setReason] = useState<string>("")
     const [recipientName, setRecipientName] = useState<string | null>(null)
     const [isChecking, setIsChecking] = useState(false)
     const [checkStatus, setCheckStatus] = useState<'idle' | 'valid' | 'invalid' | 'self'>('idle')
@@ -64,9 +65,14 @@ export function TransferModal({ certId, certName, currentUserEmail }: TransferMo
             return
         }
 
+        if (!reason) {
+            alert("Silakan pilih tujuan/skenario transfer")
+            return
+        }
+
         setIsLoading(true)
         try {
-            const result = await requestTransfer(certId, email)
+            const result = await requestTransfer(certId, email, reason)
             if (result.success) {
                 setIsSuccess(true) // Show success view
                 // router.refresh() is moved to handleClose to prevent immediate unmounting
@@ -96,6 +102,7 @@ export function TransferModal({ certId, certName, currentUserEmail }: TransferMo
         }
         setIsSuccess(false) // Reset for next time
         setEmail("")
+        setReason("")
         setCheckStatus('idle')
         setIsLoading(false)
     }
@@ -120,7 +127,7 @@ export function TransferModal({ certId, certName, currentUserEmail }: TransferMo
                         <div className="space-y-2">
                             <DialogTitle className="text-2xl font-bold text-zinc-900">Permohonan Terkirim!</DialogTitle>
                             <DialogDescription className="text-lg text-zinc-600 max-w-md mx-auto">
-                                Permintaan transfer ke <strong>{recipientName}</strong> ({email}) sedang diproses.
+                                Permintaan transfer ke <strong>{recipientName}</strong> ({email}) untuk keperluan <strong>{reason}</strong> sedang diproses.
                             </DialogDescription>
                         </div>
 
@@ -227,12 +234,31 @@ export function TransferModal({ certId, certName, currentUserEmail }: TransferMo
                                     </p>
                                 )}
                             </div>
+
+                            {/* Dropdown Alasan Transfer */}
+                            <div className="space-y-2">
+                                <Label htmlFor="reason" className="text-lg font-medium text-zinc-900">
+                                    Tujuan Transfer
+                                </Label>
+                                <select
+                                    id="reason"
+                                    value={reason}
+                                    onChange={(e) => setReason(e.target.value)}
+                                    disabled={isLoading}
+                                    className="h-14 w-full rounded-md border border-zinc-300 bg-zinc-50 px-4 text-lg text-zinc-900 focus:border-zinc-500 focus:ring-0"
+                                >
+                                    <option value="" disabled>Pilih Tujuan Transfer...</option>
+                                    <option value="Jual Beli">Jual Beli</option>
+                                    <option value="Warisan">Warisan</option>
+                                    <option value="Wakaf">Wakaf</option>
+                                </select>
+                            </div>
                         </div>
 
                         <DialogFooter>
                             <Button
                                 type="submit"
-                                disabled={isLoading || checkStatus !== 'valid'}
+                                disabled={isLoading || checkStatus !== 'valid' || !reason}
                                 onClick={handleTransfer}
                                 className="w-full h-14 text-lg font-semibold bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed"
                             >

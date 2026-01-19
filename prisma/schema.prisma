@@ -54,6 +54,7 @@ model Certificate {
 
   // Transfer Info
   transferToEmail String? @map("transfer_to_email") @db.VarChar(255)
+  transferReason  String? @map("transfer_reason") @db.VarChar(50) // Jual Beli, Warisan, Wakaf
 
   // Priority 2 - Steganography & Additional fields
   encryptedData String? @map("encrypted_data") @db.Text

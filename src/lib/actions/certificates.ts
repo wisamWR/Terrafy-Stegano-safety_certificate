@@ -54,7 +54,9 @@ export async function getUserCertificates() {
             createdAt: c.created_at,
             updatedAt: c.updated_at,
             issueDate: c.issue_date,
-            ownerId: c.owner_id
+            ownerId: c.owner_id,
+            transferToEmail: c.transfer_to_email,
+            transferReason: c.transfer_reason,
         }));
 
         return { success: true, certificates: mappedCertificates }
@@ -181,8 +183,8 @@ export async function createCertificate(formData: any) {
     }
 }
 
-export async function requestTransfer(certId: string, targetEmail: string) {
-    console.log(`[TRANSFER] Starting request: certId=${certId}, targetEmail=${targetEmail}`)
+export async function requestTransfer(certId: string, targetEmail: string, reason: string) {
+    console.log(`[TRANSFER] Starting request: certId=${certId}, targetEmail=${targetEmail}, reason=${reason}`)
     const cookieStore = await cookies()
     const sessionValue = cookieStore.get("user_session")?.value
 
@@ -214,8 +216,11 @@ export async function requestTransfer(certId: string, targetEmail: string) {
         const certificate = certificates[0]
         console.log(`[TRANSFER] Cert found via Raw SQL: ${certificate.nama_lahan} (Status: ${certificate.status})`)
 
-        if (certificate.ownerId !== userId) {
-            console.warn(`[TRANSFER] Ownership mismatch. CertOwner: ${certificate.ownerId}, CurrentUser: ${userId}`)
+        // Fix: Raw SQL returns snake_case 'owner_id'
+        const ownerId = certificate.owner_id || certificate.ownerId; // Fallback just in case
+
+        if (ownerId !== userId) {
+            console.warn(`[TRANSFER] Ownership mismatch. CertOwner: ${ownerId}, CurrentUser: ${userId}`)
             return { error: "Hanya pemilik sertifikat yang dapat melakukan transfer" }
         }
 
@@ -244,8 +249,9 @@ export async function requestTransfer(certId: string, targetEmail: string) {
         // 3. Update status to AWAITING_RECIPIENT using RAW SQL to bypass Prisma Client sync issues
         console.log("[TRANSFER] Updating certificate status via RAW SQL...")
         await prisma.$executeRawUnsafe(
-            `UPDATE "certificates" SET status = 'AWAITING_RECIPIENT', "transferToEmail" = $1 WHERE id = $2`,
+            `UPDATE "certificates" SET status = 'AWAITING_RECIPIENT', "transfer_to_email" = $1, "transfer_reason" = $2 WHERE id = $3`,
             targetEmail,
+            reason,
             certId
         )
         console.log("[TRANSFER] Raw update successful")
@@ -289,7 +295,7 @@ export async function acceptTransfer(certId: string) {
         if (!certs || certs.length === 0) return { error: "Sertifikat tidak ditemukan" }
         const cert = certs[0]
 
-        if (cert.transferToEmail !== session.email) {
+        if (cert.transfer_to_email !== session.email) {
             return { error: "Anda bukan penerima yang ditujukan untuk sertifikat ini" }
         }
 
@@ -331,7 +337,7 @@ export async function rejectTransfer(certId: string) {
 
         // 1. Reset status back to VERIFIED and clear transferToEmail
         await prisma.$executeRawUnsafe(
-            `UPDATE "certificates" SET status = 'VERIFIED', "transferToEmail" = NULL WHERE id = $1 AND "transferToEmail" = $2`,
+            `UPDATE "certificates" SET status = 'VERIFIED', "transfer_to_email" = NULL WHERE id = $1 AND "transfer_to_email" = $2`,
             certId,
             session.email
         )
@@ -373,7 +379,7 @@ export async function rejectTransfer(certId: string) {
         if (certData && certData[0]) {
             await prisma.notification.create({
                 data: {
-                    userId: certData[0].ownerId,
+                    userId: certData[0].owner_id,
                     certificateId: certId,
                     title: "Transfer Ditolak Penerima",
                     message: `${session.name} menolak permintaan pengalihan sertifikat ${certData[0].nama_lahan}.`,
@@ -425,6 +431,8 @@ export async function getAllCertificates() {
             ownerId: c.owner_id,
             verifiedAt: c.verified_at,
             rejectedAt: c.rejected_at,
+            transferToEmail: c.transfer_to_email,
+            transferReason: c.transfer_reason,
             
             // Conflict Flag
             duplicateCount: conflictMap.get(c.nomor_sertifikat) || 0,
@@ -567,7 +575,9 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
         // Check current status and metadata via RAW SQL to avoid Enum errors
         // Check current status and metadata via RAW SQL to avoid Enum errors
         const certs = await prisma.$queryRawUnsafe(
-            `SELECT c.*, m.id as "metaId", m."stego_image" as "stegoImage", m.algorithm as "metaAlgo" 
+            `SELECT c.*, 
+                    c.transfer_to_email as "transferToEmail",
+                    m.id as "metaId", m."stego_image" as "stegoImage", m.algorithm as "metaAlgo" 
              FROM "certificates" c 
              LEFT JOIN "steganography_metadata" m ON c.id = m."certificate_id" 
              WHERE c.id = $1 LIMIT 1`,
@@ -708,12 +718,32 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
                 console.log("[STEGO] Starting Steganography Process...")
                 try {
                     console.log("[STEGO] Embedding data with Node.js...");
-                    // Locate if file exists
-                    const relativePath = (certificate?.image_url || "").startsWith("/") || (certificate?.image_url || "").startsWith("\\")
-                        ? (certificate?.image_url || "").substring(1)
-                        : (certificate?.image_url || "");
+                    // Locate input file (Handle Remote URL vs Local Path)
+                    const imageUrl = certificate?.image_url || "";
+                    let safeInputPath: string;
 
-                    const safeInputPath = path.join(process.cwd(), "public", relativePath);
+                    if (imageUrl.startsWith("http")) {
+                        console.log(`[STEGO] Downloading remote image from: ${imageUrl}`);
+                        const response = await fetch(imageUrl);
+                        if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+                        
+                        const arrayBuffer = await response.arrayBuffer();
+                        const buffer = Buffer.from(arrayBuffer);
+                        
+                        // Save to temporary file for processing
+                        const tempDir = path.join(process.cwd(), "public", "uploads", "temp");
+                        await mkdir(tempDir, { recursive: true });
+                        const tempFilename = `temp_input_${Date.now()}.png`;
+                        safeInputPath = path.join(tempDir, tempFilename);
+                        await writeFile(safeInputPath, buffer);
+                        
+                    } else {
+                        // Local File
+                        const relativePath = imageUrl.startsWith("/") || imageUrl.startsWith("\\")
+                            ? imageUrl.substring(1)
+                            : imageUrl;
+                        safeInputPath = path.join(process.cwd(), "public", relativePath);
+                    }
 
                     const ext = path.extname(safeInputPath);
                     const filename = path.basename(safeInputPath, ext);
@@ -818,6 +848,16 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
                     });
 
                     // SYNC: Update Certificate table image_url and stego_image_url to the new stego image
+                    // Wait for metadata creation
+                    
+                    // Cleanup Temporary Files
+                    try {
+                        if (safeInputPath.includes("temp_input_")) await unlink(safeInputPath);
+                        await unlink(safeOutputPath);
+                        console.log("[STEGO] Temporary files cleaned up.");
+                    } catch (cleanupError) {
+                         console.warn("[STEGO] Failed to cleanup temp files:", cleanupError);
+                    }
                     await prisma.$executeRawUnsafe(
                         `UPDATE "certificates" SET "image_url" = $1, "stego_image_url" = $1 WHERE id = $2`,
                         publicUrl, // Use Supabase URL
@@ -964,7 +1004,11 @@ export async function getCertificateById(id: string) {
         console.log(`[QUERY] Fetching certificate ${id} via RAW SQL...`)
         // 1. Fetch main certificate data
         const certs = await prisma.$queryRawUnsafe(
-            `SELECT c.*, u.email as "ownerEmail", u.name as "ownerName" 
+            `SELECT c.*, 
+                    c.transfer_to_email as "transferToEmail",
+                    c.transfer_reason as "transferReason",
+                    u.email as "ownerEmail", 
+                    u.name as "ownerName" 
              FROM "certificates" c 
              JOIN "users" u ON c."owner_id" = u.id 
              WHERE c.id = $1 LIMIT 1`,

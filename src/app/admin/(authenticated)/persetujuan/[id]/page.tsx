@@ -23,6 +23,8 @@ import {
     User,
     Send
 } from "lucide-react";
+import { Timeline } from "@/components/Timeline";
+import { OwnershipTimeline } from "@/components/OwnershipTimeline";
 import {
     Card,
     CardContent,
@@ -312,7 +314,7 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
             {/* Split View: Image (Left) vs Data (Right) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                 
-                {/* Left Column: Image Viewer */}
+                {/* Left Column: Image Viewer & ACTIONS */}
                 <div className="space-y-6">
                     <Card className="overflow-hidden shadow-md border-0 ring-1 ring-zinc-200">
                          <div className="bg-zinc-50/50 p-3 border-b flex items-center justify-between">
@@ -333,6 +335,79 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
                         <div className="p-1 bg-white h-[500px] relative">
                              <ImageMagnifier src={certificate.image_url || "/certificate_dummy.png"} />
                         </div>
+                    </Card>
+
+                    {/* MOVED HERE: Actions Panel (Keputusan Admin) */}
+                    <Card className="border-l-4 border-l-indigo-500 shadow-md">
+                        <CardHeader className="bg-muted/10 pb-4">
+                            <CardTitle className="flex items-center gap-2 text-lg">
+                                <ShieldCheck className="h-5 w-5 text-indigo-600" />
+                                Keputusan Admin
+                            </CardTitle>
+                            <CardDescription>
+                                Tinjau seluruh data di atas (Fisik & Digital) sebelum memberikan keputusan final.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-6">
+                            {(certificate.status === "PENDING" || certificate.status === "Pending" || certificate.status === "TRANSFER_PENDING") ? (
+                                <div className="space-y-6">
+                                    <div className="space-y-2">
+                                        <Label>Catatan / Alasan (Opsional)</Label>
+                                        <Textarea
+                                            placeholder={isTransfer 
+                                                ? "Berikan alasan jika menolak transfer, atau catatan tambahan..." 
+                                                : "Berikan alasan jika menolak, atau catatan tambahan jika menyetujui..."
+                                            }
+                                            value={rejectionReason}
+                                            onChange={(e) => setRejectionReason(e.target.value)}
+                                            className="min-h-[100px]"
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <Button
+                                            variant="outline"
+                                            className="h-12 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                            onClick={() => handleAction("reject", rejectionReason)}
+                                            disabled={isProcessing}
+                                        >
+                                            {isProcessing ? "Proses..." : (isTransfer ? "Tolak Transfer" : "Tolak Pengajuan")}
+                                        </Button>
+                                        <Button
+                                            className="h-12 bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg transition-all"
+                                            onClick={() => handleAction("approve")}
+                                            disabled={isProcessing}
+                                        >
+                                            {isProcessing ? "Proses..." : (isTransfer ? "Setujui Transfer" : "Setujui & Terbitkan")}
+                                        </Button>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-500 text-center">
+                                        *Tindakan ini akan dicatat dalam audit log.
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-4">
+                                     <div className={`mx-auto rounded-full p-2 w-fit mb-2 ${certificate.status === 'VERIFIED' ? 'bg-emerald-100' : 'bg-red-100'}`}>
+                                        {certificate.status === 'VERIFIED' ? (
+                                            <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                                        ) : (
+                                            <XCircle className="h-6 w-6 text-red-600" />
+                                        )}
+                                    </div>
+                                    <h4 className="font-semibold text-lg">
+                                        Status: {certificate.status === 'VERIFIED' ? "DISETUJUI" : "DITOLAK"}
+                                    </h4>
+                                     <p className="text-sm text-muted-foreground">
+                                        Diproses pada {new Date(certificate.updatedAt).toLocaleDateString()}
+                                    </p>
+                                    {certificate.rejectionReason && (
+                                        <p className="text-sm text-red-600 mt-2 bg-red-50 p-2 rounded border border-red-100">
+                                            "{certificate.rejectionReason}"
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </CardContent>
                     </Card>
                 </div>
 
@@ -423,85 +498,36 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
                             </CardContent>
                         </Card>
                     </div>
+
+                    {/* SIDE-BY-SIDE HISTORY: Logs Level + Ownership Level */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* 1. Admin Log Timeline */}
+                        <Card className="h-full">
+                             <CardHeader className="pb-2 p-4">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <History className="h-4 w-4" /> Log Aktivitas
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4">
+                                <Timeline items={certificate.history} />
+                            </CardContent>
+                        </Card>
+
+                        {/* 2. Ownership Timeline (New) */}
+                        <Card className="h-full border-blue-100 bg-blue-50/30">
+                             <CardHeader className="pb-2 p-4">
+                                <CardTitle className="text-sm flex items-center gap-2 text-blue-900">
+                                    <User className="h-4 w-4" /> History Kepemilikan
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4">
+                                <OwnershipTimeline items={certificate.history} />
+                            </CardContent>
+                        </Card>
+                    </div>
+
                 </div>
             </div>
-
-            {/* Bottom Row: Actions Panel (Full Width) */}
-            <Card className="border-l-4 border-l-indigo-500 shadow-md mt-8">
-                <CardHeader className="bg-muted/10 pb-4">
-                    <CardTitle className="flex items-center gap-2 text-lg">
-                        <ShieldCheck className="h-5 w-5 text-indigo-600" />
-                        Keputusan Admin
-                    </CardTitle>
-                    <CardDescription>
-                        Tinjau seluruh data di atas (Fisik & Digital) sebelum memberikan keputusan final.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-6">
-                    {(certificate.status === "PENDING" || certificate.status === "Pending" || certificate.status === "TRANSFER_PENDING") ? (
-                        <div className="flex flex-col md:flex-row gap-6">
-                            <div className="flex-1 space-y-2">
-                                <Label>Catatan / Alasan (Opsional untuk Persetujuan)</Label>
-                                <Textarea
-                                    placeholder="Berikan alasan jika menolak, atau catatan tambahan jika menyetujui..."
-                                    value={rejectionReason}
-                                    onChange={(e) => setRejectionReason(e.target.value)}
-                                    className="min-h-[100px]"
-                                />
-                            </div>
-
-                            <Separator orientation="vertical" className="hidden md:block h-auto" />
-
-                            <div className="flex-1 space-y-4 flex flex-col justify-center">
-                                <p className="text-sm text-muted-foreground mb-2">
-                                    Pilih tindakan untuk pengajuan ini:
-                                </p>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <Button
-                                        variant="outline"
-                                        className="h-12 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                                        onClick={() => handleAction("reject", rejectionReason)}
-                                        disabled={isProcessing}
-                                    >
-                                        {isProcessing ? "Proses..." : "Tolak Pengajuan"}
-                                    </Button>
-                                    <Button
-                                        className="h-12 bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg transition-all"
-                                        onClick={() => handleAction("approve")}
-                                        disabled={isProcessing}
-                                    >
-                                        {isProcessing ? "Proses..." : "Setujui & Terbitkan"}
-                                    </Button>
-                                </div>
-                                <div className="text-[10px] text-zinc-500 text-center">
-                                    *Tindakan ini akan dicatat dalam audit log dan tidak dapat dibatalkan dengan mudah.
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="text-center py-4">
-                             <div className={`mx-auto rounded-full p-2 w-fit mb-2 ${certificate.status === 'VERIFIED' ? 'bg-emerald-100' : 'bg-red-100'}`}>
-                                {certificate.status === 'VERIFIED' ? (
-                                    <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                                ) : (
-                                    <XCircle className="h-6 w-6 text-red-600" />
-                                )}
-                            </div>
-                            <h4 className="font-semibold text-lg">
-                                Status: {certificate.status === 'VERIFIED' ? "DISETUJUI" : "DITOLAK"}
-                            </h4>
-                             <p className="text-sm text-muted-foreground">
-                                Diproses pada {new Date(certificate.updatedAt).toLocaleDateString()}
-                            </p>
-                            {certificate.rejectionReason && (
-                                <p className="text-sm text-red-600 mt-2 bg-red-50 p-2 rounded border border-red-100">
-                                    "{certificate.rejectionReason}"
-                                </p>
-                            )}
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
 
             {/* Image Zoom Modal */}
             {

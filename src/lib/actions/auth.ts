@@ -55,7 +55,9 @@ export async function loginUser(formData: any) {
             console.log("[LOGIN FAIL] User not found for email:", email);
             return { error: "Email atau password salah" }
         }
-        console.log("[LOGIN DEBUG] User found:", user.email, "Role:", user.role, "Hash:", user.password);
+        
+        // DEBUG: Force log user object to check if 'image' exists at runtime
+        console.log("[LOGIN DEBUG] Full User Object:", JSON.stringify(user, null, 2));
 
         // Check password (bcrypt)
         const isMatch = await bcrypt.compare(password, user.password).catch((err) => {
@@ -77,6 +79,7 @@ export async function loginUser(formData: any) {
             name: user.name,
             email: user.email,
             role: user.role,
+            image: (user as any).image // Cast to any to bypass potential stale type definition
         }
 
         // Use Next.js cookies (server side)

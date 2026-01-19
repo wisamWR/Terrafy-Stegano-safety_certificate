@@ -90,7 +90,7 @@ export async function updateAvatar(prevState: any, formData: FormData) {
         // Update DB
         const updatedUser = await prisma.user.update({
             where: { id: session.id },
-            data: { image: imageUrl }
+            data: { image: imageUrl } as any
         })
 
         await updateSessionCookie({ ...session, image: imageUrl })
@@ -162,5 +162,23 @@ export async function deleteAccount() {
     } catch (error) {
         console.error("Delete account error:", error)
         return { error: "Gagal menghapus akun" }
+    }
+}
+
+export async function checkUserByEmail(email: string) {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { email },
+            select: { name: true, email: true } // Only select public info
+        });
+
+        if (user) {
+            return { success: true, user };
+        } else {
+            return { success: false, error: "User not found" };
+        }
+    } catch (error) {
+        console.error("Check user error:", error);
+        return { error: "Gagal mengecek user" };
     }
 }

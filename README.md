@@ -62,10 +62,14 @@ erDiagram
    ```
 
 3. **Konfigurasi Environment**:
-   Buat file `.env` di root direktori dan sesuaikan parameter berikut:
-   ```env
-   DATABASE_URL="postgresql://user:password@localhost:5432/db_name?schema=public"
+   Salin file contoh konfigurasi dan sesuaikan isinya dengan kredensial Anda (Supabase, Database, dll):
+   ```bash
+   cp .env.example .env
    ```
+   Buka file `.env` dan isi variabel berikut:
+   - `DATABASE_URL` & `DIRECT_URL` (dari setting Database Supabase)
+   - `NEXT_PUBLIC_SUPABASE_URL` & `ANON_KEY` (dari setting API Supabase)
+   - `STEGANOGRAPHY_KEY` (Generate random 32-byte hex string untuk keamanan)
 
 4. **Setup Database (Prisma)**:
    ```bash

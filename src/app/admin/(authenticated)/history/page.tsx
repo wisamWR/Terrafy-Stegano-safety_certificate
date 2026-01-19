@@ -8,6 +8,7 @@ import { DataTable } from "@/components/ui/data-table";
 import { ColumnDef } from "@tanstack/react-table";
 import { useEffect, useState } from "react";
 import { getAdminHistory } from "@/lib/actions/certificates";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // Type definition
 type HistoryItem = {
@@ -132,6 +133,7 @@ export const columns: ColumnDef<HistoryItem>[] = [
 
 export default function HistoryPage() {
     const [history, setHistory] = useState<HistoryItem[]>([]);
+    const [activeTab, setActiveTab] = useState("all");
 
     useEffect(() => {
         const load = async () => {
@@ -143,13 +145,25 @@ export default function HistoryPage() {
                     owner: h.owner_name || "Unknown",
                     action: h.action,
                     date: new Date(h.createdAt).toLocaleString('id-ID'),
-                    status: (h.action === "Verifikasi" ? "Approved" : h.action === "Penolakan" ? "Rejected" : "Other") as "Approved" | "Rejected" | "Other",
+                    status: (h.action === "Verifikasi" || h.action === "Pengalihan Hak" ? "Approved" : h.action === "Penolakan" || h.action === "Pembatalan Transfer" ? "Rejected" : "Other") as "Approved" | "Rejected" | "Other",
                 }));
                 setHistory(mapped);
             }
         };
         load();
     }, []);
+
+    // Filter Logic
+    const filteredHistory = history.filter(item => {
+        if (activeTab === "registration") {
+            // Include Verifikasi/Penolakan but EXCLUDE Transfer ones
+            return (item.action === "Verifikasi" || item.action === "Penolakan") && !item.action.includes("Transfer") && !item.action.includes("Pengalihan");
+        }
+        if (activeTab === "transfer") {
+            return item.action === "Pengalihan Hak" || item.action === "Pembatalan Transfer";
+        }
+        return true; // "all"
+    });
 
     return (
         <div className="space-y-6">
@@ -160,7 +174,23 @@ export default function HistoryPage() {
                 </p>
             </div>
 
-            <DataTable columns={columns} data={history} searchKey="certNo" searchPlaceholder="Filter No. Sertifikat..." />
+             <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList className="grid w-full max-w-md grid-cols-3">
+                    <TabsTrigger value="all">Semua</TabsTrigger>
+                    <TabsTrigger value="registration">Validasi Baru</TabsTrigger>
+                    <TabsTrigger value="transfer">Transfer</TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="all" className="mt-4">
+                    <DataTable columns={columns} data={filteredHistory} searchKey="certNo" searchPlaceholder="Cari No. Sertifikat..." />
+                </TabsContent>
+                <TabsContent value="registration" className="mt-4">
+                     <DataTable columns={columns} data={filteredHistory} searchKey="certNo" searchPlaceholder="Cari No. Sertifikat (Validasi)..." />
+                </TabsContent>
+                <TabsContent value="transfer" className="mt-4">
+                     <DataTable columns={columns} data={filteredHistory} searchKey="certNo" searchPlaceholder="Cari No. Sertifikat (Transfer)..." />
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }

@@ -172,7 +172,7 @@ export function ApprovalContent() {
         load();
     }, []);
 
-    const newRegistrations = approvals.filter(a => a.rawStatus !== "TRANSFER_PENDING");
+    const newRegistrations = approvals.filter(a => a.rawStatus === "PENDING");
     const transferRequests = approvals.filter(a => a.rawStatus === "TRANSFER_PENDING");
 
     return (
