@@ -95,7 +95,10 @@ erDiagram
 ## 👥 Tim Pengembang
 
 - **Abid** - [GitHub](https://github.com/abidclassroomgit)
-- **Tim Project** - Kontributor
+- **Ridlo** - [GitHub](https://github.com/ridlofw)
+- **Rahman** - [GitHub](https://github.com/auliagin344-web)
+- **Wisam** - [GitHub](https://github.com/babykiminjeong-dev)
+- **Riziq** - [GitHub](https://github.com/Asenn4)
 
 ---
 *Proyek ini merupakan bagian dari tugas akhir mata kuliah Kriptografi.*
