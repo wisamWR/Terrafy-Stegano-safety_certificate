@@ -9,7 +9,7 @@ import { Steganography } from "@/lib/steganography"
 import { exec } from "child_process"
 import util from "util"
 import { revalidatePath } from "next/cache"
-import { supabase } from "@/lib/supabase"
+import { supabase, supabaseAdmin } from "@/lib/supabase"
 const execAsync = util.promisify(exec)
 
 export async function getUserCertificates() {
@@ -70,6 +70,21 @@ export async function getUserCertificates() {
 export async function createCertificate(formData: any) {
     const cookieStore = await cookies()
     const sessionValue = cookieStore.get("user_session")?.value
+    let isAdmin = false;
+    let currentUserId = "";
+
+    if (sessionValue) {
+        try {
+            const session = JSON.parse(sessionValue);
+            isAdmin = session.role === "ADMIN";
+            currentUserId = session.id; // Get ID for owner comparison
+            console.log(`[DEBUG_VIEW] Viewer: ${session.email} (ID: ${currentUserId}, Role: ${session.role})`);
+        } catch (e) { 
+            console.log("[DEBUG_VIEW] Invalid session");
+        }
+    } else {
+        console.log("[DEBUG_VIEW] No session found (Guest)");
+    }
 
     if (!sessionValue) {
         return { error: "Silakan login terlebih dahulu" }
@@ -84,19 +99,36 @@ export async function createCertificate(formData: any) {
         let imageUrl = null
 
         if (file && file.size > 0) {
-            const buffer = Buffer.from(await file.arrayBuffer())
-            // Ensure public/uploads exists
-            const uploadDir = path.join(process.cwd(), "public", "uploads")
-            await mkdir(uploadDir, { recursive: true })
+            // Validate MIME type
+            if (file.type !== "image/png") {
+                return { error: "Format file tidak didukung. Harap upload gambar format .PNG (Portable Network Graphics) untuk keamanan steganografi." };
+            }
 
+            const buffer = Buffer.from(await file.arrayBuffer())
+            
             // Safe filename
             const timestamp = Date.now()
             const safeName = file.name.replace(/[^a-z0-9.]/gi, '_').toLowerCase()
-            const filename = `cert_${timestamp}_${safeName}`
-            const filePath = path.join(uploadDir, filename)
+            const filename = `pending_${timestamp}_${safeName}` // Prefix "pending_"
 
-            await writeFile(filePath, buffer)
-            imageUrl = `/uploads/${filename}`
+            // Upload directly to Supabase "pending-uploads" (Private Bucket)
+            // Use supabaseAdmin to bypass RLS policies
+            console.log("Uploading with Admin Client...");
+            const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+                .from('pending-uploads')
+                .upload(filename, buffer, {
+                    contentType: file.type || 'image/png',
+                    upsert: false
+                });
+
+            if (uploadError) {
+                console.error("Upload error:", uploadError);
+                throw new Error("Gagal mengupload gambar ke penyimpanan aman.");
+            }
+
+            // Save the path (not public URL) to DB
+            // We'll mark it with a prefix so we know where to fetch it later
+            imageUrl = `pending-uploads/${filename}`
         }
 
         // Check for duplicate certificate number
@@ -804,51 +836,74 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
             const metaExists = await prisma.steganographyMetadata.findUnique({ where: { certificateId: id } });
 
             if (!metaExists) {
-                console.log("[STEGO] Starting Steganography Process...")
+                console.log("[STEGO] Starting Steganography Process (Secure Memory Mode)...")
                 try {
-                    console.log("[STEGO] Embedding data with Node.js...");
-                    // Locate input file (Handle Remote URL vs Local Path)
+                    // Locate input file (Handle Pending Bucket vs Legacy)
                     const imageUrl = certificate?.image_url || "";
-                    let safeInputPath: string;
+                    let inputBuffer: Buffer;
+                    let isPendingFile = false;
+                    let pendingFilename = "";
 
-                    if (imageUrl.startsWith("http")) {
+                    if (imageUrl.startsWith("pending-uploads/")) {
+                        // NEW FLOW: Download from Private Bucket
+                        console.log(`[STEGO] Downloading private pending file: ${imageUrl}`);
+                        pendingFilename = imageUrl.replace("pending-uploads/", "");
+                        
+                        const { data, error } = await supabaseAdmin.storage
+                            .from('pending-uploads')
+                            .download(pendingFilename);
+
+                        if (error || !data) throw new Error(`Gagal download file pending: ${error?.message}`);
+                        inputBuffer = Buffer.from(await data.arrayBuffer());
+                        isPendingFile = true;
+
+                    } else if (imageUrl.includes("pending-uploads") && imageUrl.includes("token=")) {
+                        // HANDLING SIGNED URLS (From Admin Preview)
+                        // It's a remote URL, but it points to OUR pending bucket.
+                        console.log(`[STEGO] Detected Signed URL for Pending File. Downloading...`);
+                        
+                        // Extract filename from URL path
+                        // Format: .../pending-uploads/filename?token=...
+                        try {
+                            const urlObj = new URL(imageUrl);
+                            const pathParts = urlObj.pathname.split('/');
+                            // Last part usually filename
+                            const rawFilename = pathParts[pathParts.length - 1];
+                            // Decode URI component just in case
+                            pendingFilename = decodeURIComponent(rawFilename);
+                            console.log(`[STEGO] Extracted original filename: ${pendingFilename}`);
+                            isPendingFile = true;
+                        } catch (e) {
+                             console.warn("[STEGO] Failed to parse Signed URL filename, cleanup might fail.");
+                        }
+
+                        // Download using standard fetch (since we have the token in URL)
+                        const response = await fetch(imageUrl);
+                        if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+                        inputBuffer = Buffer.from(await response.arrayBuffer());
+
+                    } else if (imageUrl.startsWith("http")) {
+                        // LEGACY/REMOTE
                         console.log(`[STEGO] Downloading remote image from: ${imageUrl}`);
                         const response = await fetch(imageUrl);
                         if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
-                        
-                        const arrayBuffer = await response.arrayBuffer();
-                        const buffer = Buffer.from(arrayBuffer);
-                        
-                        // Save to temporary file for processing
-                        const tempDir = path.join(process.cwd(), "public", "uploads", "temp");
-                        await mkdir(tempDir, { recursive: true });
-                        const tempFilename = `temp_input_${Date.now()}.png`;
-                        safeInputPath = path.join(tempDir, tempFilename);
-                        await writeFile(safeInputPath, buffer);
+                        inputBuffer = Buffer.from(await response.arrayBuffer());
                         
                     } else {
-                        // Local File
-                        const relativePath = imageUrl.startsWith("/") || imageUrl.startsWith("\\")
-                            ? imageUrl.substring(1)
-                            : imageUrl;
-                        safeInputPath = path.join(process.cwd(), "public", relativePath);
+                        // LEGACY LOCAL
+                        const relativePath = imageUrl.startsWith("/") ? imageUrl.substring(1) : imageUrl;
+                        const safeInputPath = path.join(process.cwd(), "public", relativePath);
+                        inputBuffer = await readFile(safeInputPath);
                     }
 
-                    const ext = path.extname(safeInputPath);
-                    const filename = path.basename(safeInputPath, ext);
-                    const stegoDir = path.join(process.cwd(), "public", "uploads", "stego");
-
-                    // Ensure directory exists
-                    await mkdir(stegoDir, { recursive: true });
-
-                    const outputFilename = `${filename}_stego.png`; // Force PNG
-                    const safeOutputPath = path.join(stegoDir, outputFilename);
-                    const publicStegoUrl = `/uploads/stego/${outputFilename}`;
+                    // Prepare Output Filename
+                    const timestamp = Date.now();
+                    const outputFilename = `verified_${timestamp}_${certificate?.nomor_sertifikat.replace(/[^a-z0-9]/gi, '_')}.png`;
 
                     // Prepare Payload
                     const verifiedDate = updateData.verifiedAt || (certificate as any)?.verifiedAt || new Date();
 
-                    // 1. Fetch History for Payload (Now includes the action we just created)
+                    // 1. Fetch History
                     const historyRows = await prisma.$queryRawUnsafe(
                         `SELECT actor_name, action, "created_at", owner_name FROM "histories" WHERE "certificate_id" = $1 ORDER BY "created_at" ASC`,
                         id
@@ -876,11 +931,10 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
 
                     const payloadStr = JSON.stringify(payload);
 
-                    // 1. Generate SHA-256 Hash for Integrity (Digital Signature)
+                    // 1. Generate SHA-256 Hash
                     const hashValue = crypto.createHash('sha256').update(payloadStr).digest('hex');
-                    console.log(`[STEGO] Generated Data Hash: ${hashValue}`);
-
-                    // 2. AES Encryption (GCM) for Privacy
+                    
+                    // 2. AES Encryption
                     const rawKey = process.env.ENCRYPTION_KEY || "a".repeat(64);
                     const key = Buffer.from(rawKey, 'hex');
                     const iv = crypto.randomBytes(12);
@@ -889,35 +943,36 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
                     let encrypted = cipher.update(payloadStr, 'utf8', 'hex');
                     encrypted += cipher.final('hex');
                     const authTag = cipher.getAuthTag().toString('hex');
-
-                    // Final payload string that goes into the image
                     const securePayload = `${iv.toString('hex')}:${authTag}:${encrypted}`;
 
-                    await Steganography.embed(safeInputPath, safeOutputPath, securePayload);
-                    console.log("[STEGO] Success! Uploading to Supabase Storage...");
+                    // 3. IN-MEMORY EMBEDDING
+                    console.log("[STEGO] Embedding data in memory...");
+                    const stegoBuffer = await Steganography.embed(inputBuffer, securePayload);
 
-                    // 1. Read the generated file
-                    const stegoFileBuffer = await readFile(safeOutputPath);
-
-                    // 2. Upload to Supabase "certificates" bucket
-                    // Path: uploads/stego/filename_stego.png
-                    const supabasePath = `uploads/stego/${outputFilename}`;
+                    // 4. Upload to "certificates" bucket (Verified)
+                    console.log("[STEGO] Uploading to Verified Bucket...");
+                    const supabasePath = `verified/${outputFilename}`;
                     const { data: uploadData, error: uploadError } = await supabase.storage
                         .from('certificates')
-                        .upload(supabasePath, stegoFileBuffer, {
+                        .upload(supabasePath, stegoBuffer, {
                             contentType: 'image/png',
                             upsert: true
                         });
 
-                    if (uploadError) {
-                        console.error("[STEGO] Supabase Upload Error:", uploadError);
-                        throw new Error("Gagal upload ke Supabase Storage");
-                    }
+                    if (uploadError) throw new Error(`Gagal upload sertifikat terverifikasi: ${uploadError.message}`);
 
-                    // 3. Get Public URL
+                    // 5. Get Public URL
                     const { data: { publicUrl } } = supabase.storage
                         .from('certificates')
                         .getPublicUrl(supabasePath);
+
+                    // 6. Cleanup Pending File
+                    if (isPendingFile && pendingFilename) {
+                        console.log(`[STEGO] Cleaning up pending file: ${pendingFilename}`);
+                        await supabase.storage
+                            .from('pending-uploads')
+                            .remove([pendingFilename]);
+                    }
 
                     console.log(`[STEGO] Uploaded to Supabase: ${publicUrl}`);
 
@@ -940,14 +995,8 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
                     // SYNC: Update Certificate table image_url and stego_image_url to the new stego image
                     // Wait for metadata creation
                     
-                    // Cleanup Temporary Files
-                    try {
-                        if (safeInputPath.includes("temp_input_")) await unlink(safeInputPath);
-                        await unlink(safeOutputPath);
-                        console.log("[STEGO] Temporary files cleaned up.");
-                    } catch (cleanupError) {
-                         console.warn("[STEGO] Failed to cleanup temp files:", cleanupError);
-                    }
+                    // SYNC: Update Certificate table image_url and stego_image_url to the new stego image
+                    // Wait for metadata creation
                     await prisma.$executeRawUnsafe(
                         `UPDATE "certificates" SET "image_url" = $1, "stego_image_url" = $1 WHERE id = $2`,
                         publicUrl, // Use Supabase URL
@@ -1092,7 +1141,23 @@ export async function getHistoryDetail(historyId: string) {
 export async function getCertificateById(id: string) {
     try {
         console.log(`[QUERY] Fetching certificate ${id} via RAW SQL...`)
-        // 1. Fetch main certificate data
+        
+        // 1. Get Session for Access Control
+        const cookieStore = await cookies()
+        const sessionValue = cookieStore.get("user_session")?.value
+        let isAdmin = false;
+        let currentUserId = "";
+
+        if (sessionValue) {
+            try {
+                const session = JSON.parse(sessionValue);
+                isAdmin = session.role === "ADMIN";
+                currentUserId = session.id;
+                console.log(`[DEBUG_VIEW] Viewer: ${session.email} (ID: ${currentUserId}, Role: ${session.role})`);
+            } catch (e) { /* ignore */ }
+        }
+
+        // 2. Fetch main certificate data
         const certs = await prisma.$queryRawUnsafe(
             `SELECT c.*, 
                     c.transfer_to_email as "transferToEmail",
@@ -1140,7 +1205,6 @@ export async function getCertificateById(id: string) {
         // Reconstruct the expected object structure
         const formattedCert = {
             ...cert,
-            // Map snake_case to camelCase for frontend compatibility
             createdAt: cert.created_at,
             updatedAt: cert.updated_at,
             issueDate: cert.issue_date,
@@ -1163,6 +1227,33 @@ export async function getCertificateById(id: string) {
             } : null,
             conflicts: conflicts
         };
+
+        // Generate Signed URL if image is in Private Bucket
+        let displayImageUrl = formattedCert.image_url;
+        const isOwnerMatch = currentUserId && currentUserId === formattedCert.ownerId;
+
+        if (displayImageUrl && displayImageUrl.startsWith("pending-uploads/")) {
+            if (isAdmin || isOwnerMatch) {
+                // Generate Signed URL valid for 1 hour
+                console.log(`[SECURE] Generating Signed URL for private file (User ID: ${currentUserId}, Owner ID: ${formattedCert.ownerId})...`);
+                const filename = displayImageUrl.replace("pending-uploads/", "");
+                const { data, error } = await supabaseAdmin.storage
+                    .from('pending-uploads')
+                    .createSignedUrl(filename, 3600); // 1 hour
+
+                if (data?.signedUrl) {
+                    displayImageUrl = data.signedUrl;
+                } else {
+                    console.error("Failed to generate signed URL:", error);
+                }
+            } else {
+                // Access Denied for others
+                displayImageUrl = "/placeholder_secure.png"; // Or null
+            }
+        }
+
+        // Apply potentially signed URL to the returned object
+        formattedCert.image_url = displayImageUrl;
 
         return { success: true, certificate: formattedCert };
 
@@ -1247,33 +1338,18 @@ export async function verifyCertificateImage(formData: FormData) {
             return { error: "File tidak valid" };
         }
 
-        // 1. Save file to temp location
+        // 1. Convert to Buffer (In-Memory)
         const buffer = Buffer.from(await file.arrayBuffer());
-        const tempDir = path.join(process.cwd(), "public", "uploads", "temp");
-        await mkdir(tempDir, { recursive: true });
+        console.log(`[VERIFY] Image loaded into memory. Size: ${buffer.length} bytes`);
 
-        const timestamp = Date.now();
-        const safeName = file.name.replace(/[^a-z0-9.]/gi, '_').toLowerCase();
-        const tempFilePath = path.join(tempDir, `verify_${timestamp}_${safeName}`);
-
-        await writeFile(tempFilePath, buffer);
-        console.log(`[VERIFY] File saved to ${tempFilePath}`);
-
-        // 2. Reveal data using Node.js Steganography
+        // 2. Reveal data using Node.js Steganography (In-Memory)
         let revealedMessage: string;
         try {
-            revealedMessage = await Steganography.reveal(tempFilePath);
-            console.log(`[VERIFY] Revealed Message: ${revealedMessage}`);
+            revealedMessage = await Steganography.reveal(buffer);
+            console.log(`[VERIFY] Revealed Message length: ${revealedMessage.length}`);
         } catch (stegoError) {
             console.error("[VERIFY] Steganography reveal failed:", stegoError);
             return { error: "Tidak ditemukan data tersembunyi. Sertifikat mungkin bukan asli atau gambar telah dimodifikasi." };
-        } finally {
-            // Cleanup temp file
-            try {
-                await unlink(tempFilePath);
-            } catch (e) {
-                console.error("[VERIFY] Failed to cleanup temp file:", e);
-            }
         }
 
         // 3. Decrypt/Parse Hidden Message
@@ -1296,6 +1372,7 @@ export async function verifyCertificateImage(formData: FormData) {
                     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
                     decipher.setAuthTag(authTag);
 
+                    // Fix: encryptedHex is a string, update expects encoding params for string input
                     let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
                     decrypted += decipher.final('utf8');
                     hiddenData = JSON.parse(decrypted);
@@ -1396,6 +1473,30 @@ export async function verifyCertificateImage(formData: FormData) {
             note: h.note
         }));
 
+        // Generate Signed URL if image is in Private Bucket
+        // Allow access if ADMIN or OWNER
+        let displayImageUrl = certificate.image_url;
+        if (displayImageUrl && displayImageUrl.startsWith("pending-uploads/")) {
+            if (isOwnerMatch) {
+                // Generate Signed URL valid for 1 hour
+                // Generate Signed URL valid for 1 hour
+                console.log(`[SECURE] Generating Signed URL for private file (User: ${"Public/Verifier"}, OwnerMatch: ${isOwnerMatch})...`);
+                const filename = displayImageUrl.replace("pending-uploads/", "");
+                const { data, error } = await supabaseAdmin.storage
+                    .from('pending-uploads')
+                    .createSignedUrl(filename, 3600); // 1 hour
+
+                if (data?.signedUrl) {
+                    displayImageUrl = data.signedUrl;
+                } else {
+                    console.error("Failed to generate signed URL:", error);
+                }
+            } else {
+                // Access Denied for others
+                displayImageUrl = "/placeholder_secure.png"; // Or null
+            }
+        }
+
         return {
             success: true,
             isOwnerMatch,
@@ -1405,15 +1506,21 @@ export async function verifyCertificateImage(formData: FormData) {
             status: certificate.status,
             transferToEmail: certificate.transferToEmail,
             certificate: {
+                id: certificate.id, // Ensure ID is passed
                 nama: certificate.nama_lahan,
                 nomor: certificate.nomor_sertifikat,
                 luas: certificate.luas_tanah,
                 location: certificate.lokasi,
                 keterangan: certificate.keterangan,
+                image_url: displayImageUrl, // Return the Signed URL or Original
                 ownerName: displayOwnerName,
                 ownerEmail: displayOwnerEmail,
                 status: certificate.status,
-                history: adminHistory
+                history: adminHistory,
+                transferReason: certificate.transferReason,
+                conflicts: [], // Add conflict data if needed
+                createdAt: certificate.createdAt,
+                updatedAt: certificate.updatedAt
             }
         };
 

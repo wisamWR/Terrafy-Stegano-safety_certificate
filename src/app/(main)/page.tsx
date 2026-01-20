@@ -219,7 +219,7 @@ export default function Home() {
                 ref={fileInputRef}
                 className="hidden"
                 onChange={handleFileChange}
-                accept="image/*"
+                accept="image/png"
             />
 
             {/* Certificates Section */}
@@ -404,6 +404,8 @@ export default function Home() {
                             />
                         </div>
 
+
+
                         <div className="grid grid-cols-2 gap-4">
                             <div className="grid gap-2">
                                 <Label htmlFor="luas">Luas Tanah</Label>
@@ -422,7 +424,7 @@ export default function Home() {
                                         m²
                                     </span>
                                 </div>
-                            </div>
+                                </div>
                             <div className="grid gap-2">
                                 <Label htmlFor="asal-hak">Asal Hak</Label>
                                 <Select 
