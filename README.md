@@ -70,6 +70,7 @@ erDiagram
    - `DATABASE_URL` & `DIRECT_URL` (dari setting Database Supabase)
    - `NEXT_PUBLIC_SUPABASE_URL` & `ANON_KEY` (dari setting API Supabase)
    - `STEGANOGRAPHY_KEY` (Generate random 32-byte hex string untuk keamanan)
+   - `SUPABASE_SERVICE_ROLE_KEY` (Untuk akses storage admin)
 
 4. **Setup Database (Prisma)**:
    ```bash
