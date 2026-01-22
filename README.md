@@ -21,23 +21,23 @@ Berikut adalah demonstrasi penggunaan fitur-fitur utama dalam aplikasi:
 
 ### 1. Upload Sertifikat (User)
 Proses pengguna mengisi detail sertifikat dan mengunggahnya untuk mengubah menjadi sertifikat digital dengan keamanan steganografi.
-<video src="video/upload-user.mp4" controls="controls" style="max-width: 100%;"></video>
+<video src="https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/upload-user.mp4" controls="controls" style="max-width: 100%;"></video>
 
 ### 2. Transfer - Kirim (User)
 Mekanisme pengguna mengirimkan permintaan transfer kepemilikan sertifikat kepada pengguna lain.
-<video src="video/transferKirim-user.mp4" controls="controls" style="max-width: 100%;"></video>
+<video src="https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/transferKirim-user.mp4" controls="controls" style="max-width: 100%;"></video>
 
 ### 3. Transfer - Terima (User)
 Penerima menyetujui atau melihat sertifikat yang telah ditransfer kepadanya.
-<video src="video/transferTerima-user.mp4" controls="controls" style="max-width: 100%;"></video>
+<video src="https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/transferTerima-user.mp4" controls="controls" style="max-width: 100%;"></video>
 
 ### 4. Verifikasi Transfer (Admin)
 Admin memverifikasi dan menyetujui permintaan transfer hak milik untuk memastikan legalitas.
-<video src="video/transferVerif-admin.mp4" controls="controls" style="max-width: 100%;"></video>
+<video src="https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/transferVerif-admin.mp4" controls="controls" style="max-width: 100%;"></video>
 
 ### 5. Verifikasi Keaslian (User)
 Fitur untuk memvalidasi keaslian sertifikat dengan mengunggah gambar digital dan mengecek metadata tersembunyi.
-<video src="video/verifikasi-user.mp4" controls="controls" style="max-width: 100%;"></video>
+<video src="https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/verifikasi-user.mp4" controls="controls" style="max-width: 100%;"></video>
 
 ## 🛠️ Teknologi yang Digunakan
 
