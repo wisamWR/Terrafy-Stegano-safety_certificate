@@ -42,7 +42,7 @@ export function Timeline({ items }: TimelineProps) {
     return (
         <div className="relative space-y-0 pl-2">
              {/* Vertical Line */}
-            <div className="absolute left-[19px] top-2 bottom-4 w-[2px] bg-zinc-200" />
+            <div className="absolute left-[19px] top-2 bottom-4 w-[2px] bg-zinc-200 dark:bg-zinc-700" />
 
             {items.map((item, index) => {
                 const isLast = index === items.length - 1;
@@ -57,13 +57,13 @@ export function Timeline({ items }: TimelineProps) {
                         </div>
 
                         <div className="flex flex-col pt-1">
-                            <h4 className="text-sm font-semibold text-zinc-900 leading-none">
+                            <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 leading-none">
                                 {item.action}
                             </h4>
                             <p className="text-xs text-muted-foreground mt-1 mb-1.5 leading-relaxed">
                                 {item.note || `Oleh ${item.actor_name}`}
                             </p>
-                            <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-500 bg-zinc-50 w-fit px-1.5 py-0.5 rounded border border-zinc-100">
+                            <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 w-fit px-1.5 py-0.5 rounded border border-zinc-100 dark:border-zinc-800">
                                 <Clock className="h-3 w-3" />
                                 {new Date(item.createdAt).toLocaleDateString("id-ID", {
                                     day: "2-digit",

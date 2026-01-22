@@ -110,8 +110,8 @@ export default function VerificationPage() {
                                 <ShieldCheck className="h-6 w-6 text-white" />
                             </div>
                             <div>
-                                <CardTitle className="text-2xl font-bold text-slate-900">Verifikasi Keaslian Sertifikat</CardTitle>
-                                <CardDescription className="text-slate-600 font-medium">
+                                <CardTitle className="text-2xl font-bold text-slate-900 dark:text-slate-100">Verifikasi Keaslian Sertifikat</CardTitle>
+                                <CardDescription className="text-slate-600 dark:text-slate-400 font-medium">
                                     Unggah file sertifikat (stego-image) untuk memvalidasi integritas data
                                 </CardDescription>
                             </div>
@@ -169,8 +169,8 @@ export default function VerificationPage() {
                             <div className="bg-red-500 p-4 rounded-full shadow-lg mb-4">
                                 <XCircle className="h-12 w-12 text-white" />
                             </div>
-                            <h3 className="text-2xl font-bold text-red-700">Sertifikat Tidak Valid</h3>
-                            <p className="text-red-900 font-medium mt-2 max-w-md">{errorMessage}</p>
+                            <h3 className="text-2xl font-bold text-red-700 dark:text-red-400">Sertifikat Tidak Valid</h3>
+                            <p className="text-red-900 dark:text-red-200 font-medium mt-2 max-w-md">{errorMessage}</p>
                             <Button
                                 variant="outline"
                                 className="mt-6 border-red-300 text-red-700 hover:bg-red-100"
@@ -196,16 +196,16 @@ export default function VerificationPage() {
                                 </div>
                                 <div className="space-y-0.5">
                                     <h2 className={`text-xl font-bold tracking-tight ${result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                        ? "text-blue-900"
-                                        : !result.isOwnerMatch ? "text-amber-900" : "text-emerald-900"
+                                        ? "text-blue-900 dark:text-blue-200"
+                                        : !result.isOwnerMatch ? "text-amber-900 dark:text-amber-200" : "text-emerald-900 dark:text-emerald-200"
                                         }`}>
                                         {result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
                                             ? "Proses Pengalihan Hak"
                                             : !result.isOwnerMatch ? "Sertifikat Pindah Tangan" : "Sertifikat Valid & Asli"}
                                     </h2>
                                     <p className={`text-sm font-semibold opacity-90 ${result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                        ? "text-blue-700"
-                                        : !result.isOwnerMatch ? "text-amber-700" : "text-emerald-700"
+                                        ? "text-blue-700 dark:text-blue-300"
+                                        : !result.isOwnerMatch ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"
                                         }`}>
                                         {result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
                                             ? "ℹ️ Sertifikat ini sedang dalam proses transfer kepemilikan."
@@ -309,7 +309,7 @@ export default function VerificationPage() {
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                                             <div className="space-y-0.5 group">
                                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] group-hover:text-blue-500 transition-colors">Nama Sertifikat</label>
-                                                <p className="font-bold text-lg text-slate-900 leading-tight">{result.nama}</p>
+                                                <p className="font-bold text-lg text-slate-900 dark:text-slate-100 leading-tight">{result.nama}</p>
                                             </div>
                                             <div className="space-y-0.5 group">
                                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] group-hover:text-emerald-500 transition-colors">Nomor Sertifikat</label>
@@ -317,11 +317,11 @@ export default function VerificationPage() {
                                             </div>
                                             <div className="space-y-0.5 group">
                                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] group-hover:text-blue-500 transition-colors">Luas Tanah</label>
-                                                <p className="font-bold text-lg text-slate-900">{result.luas} <span className="text-xs font-medium text-slate-400">m²</span></p>
+                                                <p className="font-bold text-lg text-slate-900 dark:text-slate-100">{result.luas} <span className="text-xs font-medium text-slate-400">m²</span></p>
                                             </div>
                                             <div className="space-y-0.5 group">
                                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] group-hover:text-blue-500 transition-colors">Lokasi Properti</label>
-                                                <p className="font-bold text-base text-slate-900 flex items-center gap-2">
+                                                <p className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
                                                     <MapPin className="h-4 w-4 text-blue-600" /> {result.location}
                                                 </p>
                                             </div>
@@ -345,7 +345,7 @@ export default function VerificationPage() {
                                                             </div>
                                                             <label className="text-[9px] uppercase font-bold text-slate-500 tracking-wider">Pemilik Sah (Database)</label>
                                                         </div>
-                                                        <p className="text-lg font-bold text-slate-900">{result.ownerName || "Tidak Diketahui"}</p>
+                                                        <p className="text-lg font-bold text-slate-900 dark:text-slate-100">{result.ownerName || "Tidak Diketahui"}</p>
                                                         <div className="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mt-1.5 bg-white/40 py-1 px-2.5 rounded-full w-fit">
                                                             <User className="h-3 w-3" /> {result.ownerEmail}
                                                         </div>
@@ -408,7 +408,7 @@ export default function VerificationPage() {
                                                             {/* Content */}
                                                             <div className="flex flex-col gap-2">
                                                                 <div className="space-y-0.5">
-                                                                    <h3 className={`text-base font-bold leading-none ${isCurrent ? "text-blue-700" : "text-slate-900"}`}>
+                                                                    <h3 className={`text-base font-bold leading-none ${isCurrent ? "text-blue-700 dark:text-blue-300" : "text-slate-900 dark:text-slate-100"}`}>
                                                                         {h.name}
                                                                     </h3>
                                                                     <div className="flex items-center gap-2 mt-2">

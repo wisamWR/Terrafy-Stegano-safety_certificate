@@ -153,7 +153,7 @@ export default function SettingsPage() {
     { value: "profile", label: "Profil", icon: User, description: "Kelola informasi pribadi Anda" },
     { value: "appearance", label: "Tampilan", icon: Palette, description: "Sesuaikan tema aplikasi" },
     { value: "security", label: "Keamanan", icon: Shield, description: "Kata sandi dan keamanan akun" },
-    { value: "danger", label: "Danger Zone", icon: Trash2, description: "Hapus akun permanen", className: "text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20" },
+    { value: "danger", label: "Danger Zone", icon: Trash2, description: "Hapus akun permanen", className: "text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/20" },
   ]
 
   if (!user) return <div className="p-8 text-center animate-pulse">Memuat pengaturan...</div>
@@ -387,18 +387,18 @@ export default function SettingsPage() {
             <div className={activeTab === "danger" ? "block animate-in fade-in slide-in-from-bottom-4 duration-500" : "hidden"}>
               <Card className="border-red-200 bg-red-50 dark:bg-red-950/10 dark:border-red-900">
                 <CardHeader>
-                  <CardTitle className="text-red-600 flex items-center gap-2">
+                  <CardTitle className="text-red-600 dark:text-red-400 flex items-center gap-2">
                     <Trash2 className="h-5 w-5" />
                     Hapus Akun
                   </CardTitle>
-                  <CardDescription className="text-red-600/80">
+                  <CardDescription className="text-red-600/80 dark:text-red-400/80">
                     Tindakan ini permanen. Data sertifikat Anda mungkin akan tetap tersimpan di blockchain/arsip untuk validitas hukum.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4 max-w-md">
                     <div className="space-y-2">
-                         <Label className="text-red-900">Konfirmasi Kata Sandi</Label>
+                         <Label className="text-red-900 dark:text-red-300">Konfirmasi Kata Sandi</Label>
                          <Input
                             id="delete-password-input"
                             type="password"

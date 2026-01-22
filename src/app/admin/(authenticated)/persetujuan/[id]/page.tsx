@@ -294,8 +294,8 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
                     <div className="flex items-start gap-3">
                         <XCircle className="h-5 w-5 text-red-600 mt-0.5" />
                         <div className="space-y-2">
-                            <h4 className="font-bold text-red-900">Peringatan: Duplikasi Terdeteksi!</h4>
-                            <p className="text-sm text-red-800">
+                            <h4 className="font-bold text-red-900 dark:text-red-300">Peringatan: Duplikasi Terdeteksi!</h4>
+                            <p className="text-sm text-red-800 dark:text-red-200">
                                 Nomor Sertifikat <b>{certificate.nomor_sertifikat}</b> juga digunakan oleh pengajuan lain:
                             </p>
                             <ul className="text-sm space-y-1 list-disc list-inside text-red-800 font-medium">
@@ -367,7 +367,7 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
                                     <div className="grid grid-cols-2 gap-4">
                                         <Button
                                             variant="outline"
-                                            className="h-12 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                            className="h-12 border-red-200 text-red-700 dark:text-red-400 hover:bg-red-50 hover:text-red-800 dark:hover:text-red-300"
                                             onClick={() => handleAction("reject", rejectionReason)}
                                             disabled={isProcessing}
                                         >
@@ -428,11 +428,11 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
                                     <div className="grid grid-cols-2 gap-4 text-sm">
                                         <div>
                                             <p className="text-xs text-amber-600 font-medium">Dari</p>
-                                            <p className="font-semibold text-amber-900">{certificate.owner.name}</p>
+                                            <p className="font-semibold text-amber-900 dark:text-amber-300">{certificate.owner.name}</p>
                                         </div>
                                         <div>
                                             <p className="text-xs text-amber-600 font-medium">Kepada</p>
-                                            <p className="font-semibold text-amber-900">{certificate.transferToEmail}</p>
+                                            <p className="font-semibold text-amber-900 dark:text-amber-300">{certificate.transferToEmail}</p>
                                         </div>
                                     </div>
                                 </div>

@@ -227,8 +227,8 @@ export default function Home() {
                 {/* Section Header */}
                 <div className="flex items-center justify-between mb-8">
                     <div>
-                        <h2 className="text-3xl font-bold text-slate-800">Sertifikat Terbaru</h2>
-                        <p className="text-slate-600 mt-1">Kelola dan pantau sertifikat Anda</p>
+                        <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100">Sertifikat Terbaru</h2>
+                        <p className="text-slate-600 dark:text-slate-400 mt-1">Kelola dan pantau sertifikat Anda</p>
                     </div>
                     <Link href="/sertifikat">
                         <Button variant="ghost" className="glass-card glass-hover border-white/30">
@@ -249,9 +249,9 @@ export default function Home() {
                                             'border-emerald-400/30 bg-emerald-400/5 shadow-[0_0_15px_-5px_rgba(52,211,153,0.1)] hover:border-emerald-400'}`}>
                                     <CardHeader>
                                         <div className="flex justify-between items-start">
-                                            <CardTitle className={`text-xl font-bold tracking-tight transition-colors ${isRejected ? 'text-red-900 group-hover:text-red-700' :
-                                                    c.status === 'PENDING' ? 'text-amber-900 group-hover:text-amber-700' :
-                                                        'text-emerald-950 group-hover:text-emerald-700'}`}>
+                                            <CardTitle className={`text-xl font-bold tracking-tight transition-colors ${isRejected ? 'text-red-900 dark:text-red-300 group-hover:text-red-700 dark:group-hover:text-red-200' :
+                                                    c.status === 'PENDING' ? 'text-amber-900 dark:text-amber-300 group-hover:text-amber-700 dark:group-hover:text-amber-200' :
+                                                        'text-emerald-950 dark:text-emerald-300 group-hover:text-emerald-700 dark:group-hover:text-emerald-200'}`}>
                                                 {c.nama_lahan}
                                             </CardTitle>
                                             <div className="flex items-center gap-2">
@@ -292,15 +292,15 @@ export default function Home() {
                                     <CardContent>
                                         <div className="grid grid-cols-1 gap-y-2 text-sm text-zinc-600 sm:grid-cols-[auto_1fr] sm:gap-x-4">
                                             <div className="font-bold text-[10px] uppercase text-zinc-400 tracking-wider">Alamat :</div>
-                                            <div className="font-semibold text-zinc-900 line-clamp-1">
+                                            <div className="font-semibold text-zinc-900 dark:text-zinc-200 line-clamp-1">
                                                 {c.lokasi}
                                             </div>
 
                                             <div className="font-bold text-[10px] uppercase text-zinc-400 tracking-wider">Luas :</div>
-                                            <div className="font-semibold text-zinc-900">{c.luas_tanah}</div>
+                                            <div className="font-semibold text-zinc-900 dark:text-zinc-200">{c.luas_tanah}</div>
 
                                             <div className="font-bold text-[10px] uppercase text-zinc-400 tracking-wider">Tanggal :</div>
-                                            <div className="font-semibold text-zinc-900">
+                                            <div className="font-semibold text-zinc-900 dark:text-zinc-200">
                                                 {new Date(c.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                                             </div>
 
