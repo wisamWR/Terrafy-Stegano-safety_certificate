@@ -2,6 +2,8 @@
 
 Sistem manajemen sertifikat digital berbasis web yang mengintegrasikan teknik **Kriptografi** dan **Steganografi** untuk menjamin keamanan, keaslian, dan integritas data sertifikat. Proyek ini dikembangkan sebagai tugas akhir untuk memfasilitasi pengelolaan sertifikat tanah/sawah secara digital dengan perlindungan data berlapis.
 
+> 🌐 **Live Demo:** [https://terrafy-stegano-safety-certificate.vercel.app/](https://terrafy-stegano-safety-certificate.vercel.app/)
+
 ## 🌟 Fitur Utama
 
 - **Pendaftaran Sertifikat**: Pengguna dapat mengajukan sertifikat tanah/sawah dengan detail lokasi (koordinat), luas, dan nomor sertifikat.
