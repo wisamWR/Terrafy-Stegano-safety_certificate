@@ -142,7 +142,7 @@ export function Navbar() {
 
     const unreadCount = notifications.filter(n => !n.isRead).length;
 
-    console.log(`[NAVBAR] Rendering for user: ${user?.email} (ID: ${user?.id}). Unread: ${unreadCount}`);
+
 
     return (
         <nav className="sticky top-0 z-50 w-full glass-card border-b border-white/20 shadow-glass">
