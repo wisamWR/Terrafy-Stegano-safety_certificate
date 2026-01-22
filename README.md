@@ -22,27 +22,27 @@ Berikut adalah demonstrasi penggunaan fitur-fitur utama dalam aplikasi:
 ### 1. Upload Sertifikat (User)
 Proses pengguna mengisi detail sertifikat dan mengunggahnya untuk mengubah menjadi sertifikat digital dengan keamanan steganografi.
 
-> [🎥 **Tonton Video Demo: Upload Sertifikat**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/upload-user.mp4)
+> [🎥 **Tonton Video Demo: Upload Sertifikat**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/blob/main/video/upload-user.mp4)
 
 ### 2. Transfer - Kirim (User)
 Mekanisme pengguna mengirimkan permintaan transfer kepemilikan sertifikat kepada pengguna lain.
 
-> [🎥 **Tonton Video Demo: Transfer (Kirim)**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/transferKirim-user.mp4)
+> [🎥 **Tonton Video Demo: Transfer (Kirim)**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/blob/main/video/transferKirim-user.mp4)
 
 ### 3. Transfer - Terima (User)
 Penerima menyetujui atau melihat sertifikat yang telah ditransfer kepadanya.
 
-> [🎥 **Tonton Video Demo: Transfer (Terima)**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/transferTerima-user.mp4)
+> [🎥 **Tonton Video Demo: Transfer (Terima)**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/blob/main/video/transferTerima-user.mp4)
 
 ### 4. Verifikasi Transfer (Admin)
 Admin memverifikasi dan menyetujui permintaan transfer hak milik untuk memastikan legalitas.
 
-> [🎥 **Tonton Video Demo: Verifikasi Transfer**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/transferVerif-admin.mp4)
+> [🎥 **Tonton Video Demo: Verifikasi Transfer**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/blob/main/video/transferVerif-admin.mp4)
 
 ### 5. Verifikasi Keaslian (User)
 Fitur untuk memvalidasi keaslian sertifikat dengan mengunggah gambar digital dan mengecek metadata tersembunyi.
 
-> [🎥 **Tonton Video Demo: Verifikasi Keaslian**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/raw/main/video/verifikasi-user.mp4)
+> [🎥 **Tonton Video Demo: Verifikasi Keaslian**](https://github.com/ridlofw/web-kripto-steganografi-sertifikat/blob/main/video/verifikasi-user.mp4)
 
 ## 🛠️ Teknologi yang Digunakan
 
