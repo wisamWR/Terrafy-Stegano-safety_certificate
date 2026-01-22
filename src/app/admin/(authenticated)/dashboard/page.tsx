@@ -30,6 +30,8 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 
+export const dynamic = "force-dynamic";
+
 const chartConfig = {
     total: {
         label: "Total Pengajuan",
