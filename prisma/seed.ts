@@ -1,4 +1,4 @@
-import { PrismaClient, Role, Status, LandType, NotificationType } from "@prisma/client"
+import { PrismaClient, Role, Status, NotificationType } from "@prisma/client"
 import * as bcrypt from "bcryptjs"
 import { Pool } from 'pg'
 import { PrismaPg } from '@prisma/adapter-pg'
