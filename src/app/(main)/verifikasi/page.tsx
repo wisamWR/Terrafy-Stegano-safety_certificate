@@ -33,10 +33,10 @@ interface Certificate {
     transferToEmail?: string | null;
     history: {
         name: string;
-        email: string;
+        email: string | null;
         type: string;
         date: string;
-        note: string;
+        note: string | null;
     }[];
 }
 

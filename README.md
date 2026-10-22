@@ -124,6 +124,34 @@ erDiagram
 3. **Verifikasi**: Di halaman Verifikasi, unggah file sertifikat PNG yang telah diunduh. Sistem akan mengekstrak metadata dan mencocokkan dengan database.
 4. **Transfer**: Masukkan email penerima untuk mengalihkan hak kepemilikan sertifikat.
 
+## 🧪 Testing
+
+```bash
+npm run typecheck          # TypeScript (build juga gagal bila ada error tipe)
+npm test                   # unit test: steganografi, sesi, kunci, storage
+```
+
+Test integrasi menjalankan seluruh alur (registrasi, approval + segel stego, transfer, verifikasi publik)
+terhadap PostgreSQL sungguhan. **Gunakan database kosong khusus test: semua tabel dihapus setiap test.**
+
+```bash
+createdb terrafy_test
+DATABASE_URL=postgresql://postgres@localhost:5432/terrafy_test npx prisma db push
+TEST_DATABASE_URL=postgresql://postgres@localhost:5432/terrafy_test npm run test:integration
+```
+
+Tanpa `TEST_DATABASE_URL`, test integrasi otomatis di-skip.
+
+### Struktur Kode Inti
+
+| Lokasi | Isi |
+|---|---|
+| `src/lib/actions/*.ts` | Server action tipis: cek sesi, parsing input, panggil service |
+| `src/lib/certificates/*` | Logika bisnis (registrasi, transfer, approval, verifikasi, query) yang bisa diuji langsung |
+| `src/lib/steganography.ts` | LSB pada kanal RGB PNG (format bit stabil, kompatibel dengan sertifikat lama) |
+| `src/lib/certificates/payload.ts` | Enkripsi AES-256-GCM + hash payload segel |
+| `src/lib/session.ts`, `src/lib/auth-guard.ts` | Cookie sesi bertanda tangan + otorisasi berbasis role di database |
+
 ## 👥 Tim Pengembang
 
 - **Abid** - [GitHub](https://github.com/abidclassroomgit)

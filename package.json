@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "test:integration": "tsx --test --test-concurrency=1 tests/certificates.integration.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^5.22.0",

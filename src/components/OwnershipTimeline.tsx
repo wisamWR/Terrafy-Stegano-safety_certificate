@@ -8,9 +8,9 @@ interface OwnershipTimelineProps {
         id: string;
         action: string;
         actor_name: string;
-        owner_name: string;
-        owner_email?: string;
-        note: string;
+        owner_name: string | null;
+        owner_email?: string | null;
+        note: string | null;
         createdAt: string | Date;
     }[];
 }
