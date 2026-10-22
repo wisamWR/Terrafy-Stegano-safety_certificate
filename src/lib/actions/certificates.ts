@@ -1,7 +1,8 @@
 "use server"
 
 import prisma from "@/lib/prisma"
-import { cookies } from "next/headers"
+import { getAuthUser, getAdminUser } from "@/lib/auth-guard"
+import { getEncryptionKey, getLegacyDecryptionKeys } from "@/lib/crypto-key"
 import * as crypto from "crypto"
 import { writeFile, mkdir, unlink, readFile } from "fs/promises"
 import path from "path"
@@ -13,30 +14,14 @@ import { supabase, supabaseAdmin } from "@/lib/supabase"
 const execAsync = util.promisify(exec)
 
 export async function getUserCertificates() {
-    const cookieStore = await cookies()
-    const sessionValue = cookieStore.get("user_session")?.value
+    const session = await getAuthUser()
 
-    if (!sessionValue) {
+    if (!session) {
         return { error: "Silakan login terlebih dahulu" }
     }
 
     try {
-        const session = JSON.parse(sessionValue)
         const userId = session.id
-
-        console.log(`[DEBUG_CERT] Fetching certificates for UserID: ${userId}`)
-        
-        // Debug: Check table columns
-        try {
-             const columns = await prisma.$queryRawUnsafe(`
-                SELECT column_name::text 
-                FROM information_schema.columns 
-                WHERE table_name = 'certificates'
-             `) as any[];
-             console.log("[DEBUG_CERT] Table 'certificates' columns:", columns.map((c:any) => c.column_name).join(', '));
-        } catch (e) {
-            console.error("[DEBUG_CERT] Failed to inspect columns:", e);
-        }
 
         const certificates = await prisma.$queryRawUnsafe(
             `SELECT * FROM "certificates" 
@@ -68,30 +53,15 @@ export async function getUserCertificates() {
 
 
 export async function createCertificate(formData: any) {
-    const cookieStore = await cookies()
-    const sessionValue = cookieStore.get("user_session")?.value
-    let isAdmin = false;
-    let currentUserId = "";
+    const session = await getAuthUser()
+    const isAdmin = session?.role === "ADMIN";
+    const currentUserId = session?.id ?? "";
 
-    if (sessionValue) {
-        try {
-            const session = JSON.parse(sessionValue);
-            isAdmin = session.role === "ADMIN";
-            currentUserId = session.id; // Get ID for owner comparison
-            console.log(`[DEBUG_VIEW] Viewer: ${session.email} (ID: ${currentUserId}, Role: ${session.role})`);
-        } catch (e) { 
-            console.log("[DEBUG_VIEW] Invalid session");
-        }
-    } else {
-        console.log("[DEBUG_VIEW] No session found (Guest)");
-    }
-
-    if (!sessionValue) {
+    if (!session) {
         return { error: "Silakan login terlebih dahulu" }
     }
 
     try {
-        const session = JSON.parse(sessionValue)
         const userId = session.id
 
         // Handle File Upload
@@ -219,13 +189,11 @@ export async function createCertificate(formData: any) {
 }
 
 export async function updateCertificate(certId: string, formData: any) {
-    const cookieStore = await cookies()
-    const sessionValue = cookieStore.get("user_session")?.value
+    const session = await getAuthUser()
 
-    if (!sessionValue) return { error: "Silakan login terlebih dahulu" }
+    if (!session) return { error: "Silakan login terlebih dahulu" }
 
     try {
-        const session = JSON.parse(sessionValue)
         const userId = session.id
 
         // 1. Check ownership and status
@@ -306,16 +274,14 @@ export async function updateCertificate(certId: string, formData: any) {
 
 export async function requestTransfer(certId: string, targetEmail: string, reason: string) {
     console.log(`[TRANSFER] Starting request: certId=${certId}, targetEmail=${targetEmail}, reason=${reason}`)
-    const cookieStore = await cookies()
-    const sessionValue = cookieStore.get("user_session")?.value
+    const session = await getAuthUser()
 
-    if (!sessionValue) {
+    if (!session) {
         console.warn("[TRANSFER] No session found")
         return { error: "Silakan login terlebih dahulu" }
     }
 
     try {
-        const session = JSON.parse(sessionValue)
         const userId = session.id
         console.log(`[TRANSFER] User: ${session.email} (ID: ${userId})`)
 
@@ -399,14 +365,11 @@ export async function requestTransfer(certId: string, targetEmail: string, reaso
 }
 
 export async function acceptTransfer(certId: string) {
-    const cookieStore = await cookies()
-    const sessionValue = cookieStore.get("user_session")?.value
+    const session = await getAuthUser()
 
-    if (!sessionValue) return { error: "Silakan login terlebih dahulu" }
+    if (!session) return { error: "Silakan login terlebih dahulu" }
 
     try {
-        const session = JSON.parse(sessionValue)
-
         // 1. Fetch cert and check if session email matches transferToEmail
         const certs = await prisma.$queryRawUnsafe(
             `SELECT * FROM "certificates" WHERE id = $1 LIMIT 1`,
@@ -420,11 +383,16 @@ export async function acceptTransfer(certId: string) {
             return { error: "Anda bukan penerima yang ditujukan untuk sertifikat ini" }
         }
 
-        // 2. Update status to TRANSFER_PENDING (Now it goes to Admin)
-        await prisma.$executeRawUnsafe(
-            `UPDATE "certificates" SET status = 'TRANSFER_PENDING' WHERE id = $1`,
-            certId
+        // 2. Update status to TRANSFER_PENDING (Now it goes to Admin).
+        // Conditional on the current status so a recipient cannot skip or replay steps of the flow.
+        const updated = await prisma.$executeRawUnsafe(
+            `UPDATE "certificates" SET status = 'TRANSFER_PENDING' WHERE id = $1 AND status = 'AWAITING_RECIPIENT' AND "transfer_to_email" = $2`,
+            certId,
+            session.email
         )
+        if (updated === 0) {
+            return { error: "Permohonan transfer ini tidak lagi menunggu konfirmasi Anda" }
+        }
 
         // 3. Add History
         await prisma.history.create({
@@ -448,20 +416,20 @@ export async function acceptTransfer(certId: string) {
 }
 
 export async function rejectTransfer(certId: string) {
-    const cookieStore = await cookies()
-    const sessionValue = cookieStore.get("user_session")?.value
+    const session = await getAuthUser()
 
-    if (!sessionValue) return { error: "Silakan login terlebih dahulu" }
+    if (!session) return { error: "Silakan login terlebih dahulu" }
 
     try {
-        const session = JSON.parse(sessionValue)
-
-        // 1. Reset status back to VERIFIED and clear transferToEmail
-        await prisma.$executeRawUnsafe(
-            `UPDATE "certificates" SET status = 'VERIFIED', "transfer_to_email" = NULL WHERE id = $1 AND "transfer_to_email" = $2`,
+        // 1. Reset status back to VERIFIED and clear transferToEmail (only while awaiting this recipient)
+        const updated = await prisma.$executeRawUnsafe(
+            `UPDATE "certificates" SET status = 'VERIFIED', "transfer_to_email" = NULL WHERE id = $1 AND status = 'AWAITING_RECIPIENT' AND "transfer_to_email" = $2`,
             certId,
             session.email
         )
+        if (updated === 0) {
+            return { error: "Permohonan transfer ini tidak lagi menunggu konfirmasi Anda" }
+        }
 
         // 2. Add History
         await prisma.history.create({
@@ -518,7 +486,8 @@ export async function rejectTransfer(certId: string) {
 }
 
 export async function getAllCertificates() {
-    // Hanya untuk ADMIN/Dinas
+    if (!(await getAdminUser())) return { error: "Anda tidak memiliki akses admin" }
+
     try {
         console.log("[QUERY] Fetching all certificates via RAW SQL...")
         const certs = await prisma.$queryRawUnsafe(
@@ -573,6 +542,8 @@ export async function getAllCertificates() {
 }
 
 export async function getAdminStats() {
+    if (!(await getAdminUser())) return { error: "Anda tidak memiliki akses admin" }
+
     try {
         const whereNotArchived = {
             AND: [
@@ -661,37 +632,18 @@ export async function getAdminStats() {
 export async function updateCertificateStatus(id: string, status: "VERIFIED" | "REJECTED", note?: string, adminId?: string) {
     console.log(`[ACTION] updateCertificateStatus called for ${id} with status ${status}`)
     try {
-        // 1. Get session from Cookie (Secure)
-        const cookieStore = await cookies()
-        const sessionValue = cookieStore.get("user_session")?.value
-
-        if (!sessionValue) {
-            return { error: "Silakan login sebagai admin" }
-        }
-
-        const session = JSON.parse(sessionValue)
-
-        // 2. Validate Admin Role
-        if (session.role !== "ADMIN") {
-            return { error: "Anda tidak memiliki akses admin" }
+        // Signed session + role re-checked against the DB (also covers deleted/demoted admins)
+        const admin = await getAdminUser()
+        if (!admin) {
+            return { error: "Anda tidak memiliki akses admin. Silakan login ulang sebagai admin." }
         }
 
         const adminInfo = {
-            id: session.id,
-            name: session.name || "Admin",
-            email: session.email
+            id: admin.id,
+            name: admin.name || "Admin",
+            email: admin.email
         }
         console.log(`[ACTION] Admin session: ${adminInfo.email} (${adminInfo.id})`)
-
-        // 2. Validate Admin Exists in DB (Important after database reset)
-        const adminInDb = await prisma.user.findUnique({
-            where: { id: adminInfo.id }
-        });
-
-        if (!adminInDb) {
-            return { error: "Sesi admin tidak valid atau akun telah dihapus. Silakan logout dan login kembali." }
-        }
-        console.log(`[ACTION] Admin verified in DB: ${adminInDb.email}`)
 
         // Check current status and metadata via RAW SQL to avoid Enum errors
         // Check current status and metadata via RAW SQL to avoid Enum errors
@@ -935,8 +887,7 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
                     const hashValue = crypto.createHash('sha256').update(payloadStr).digest('hex');
                     
                     // 2. AES Encryption
-                    const rawKey = process.env.ENCRYPTION_KEY || "a".repeat(64);
-                    const key = Buffer.from(rawKey, 'hex');
+                    const key = getEncryptionKey();
                     const iv = crypto.randomBytes(12);
                     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
@@ -952,7 +903,7 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
                     // 4. Upload to "certificates" bucket (Verified)
                     console.log("[STEGO] Uploading to Verified Bucket...");
                     const supabasePath = `verified/${outputFilename}`;
-                    const { data: uploadData, error: uploadError } = await supabase.storage
+                    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
                         .from('certificates')
                         .upload(supabasePath, stegoBuffer, {
                             contentType: 'image/png',
@@ -969,7 +920,7 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
                     // 6. Cleanup Pending File
                     if (isPendingFile && pendingFilename) {
                         console.log(`[STEGO] Cleaning up pending file: ${pendingFilename}`);
-                        await supabase.storage
+                        await supabaseAdmin.storage
                             .from('pending-uploads')
                             .remove([pendingFilename]);
                     }
@@ -1069,6 +1020,8 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
 }
 
 export async function getAdminHistory() {
+    if (!(await getAdminUser())) return { error: "Anda tidak memiliki akses admin" }
+
     try {
         console.log("[QUERY] Fetching admin history via RAW SQL...")
         const rows = await prisma.$queryRawUnsafe(`
@@ -1109,6 +1062,8 @@ export async function getAdminHistory() {
 }
 
 export async function getHistoryDetail(historyId: string) {
+    if (!(await getAdminUser())) return { error: "Anda tidak memiliki akses admin" }
+
     try {
         console.log(`[QUERY] Fetching history detail for ${historyId}...`)
 
@@ -1143,19 +1098,12 @@ export async function getCertificateById(id: string) {
         console.log(`[QUERY] Fetching certificate ${id} via RAW SQL...`)
         
         // 1. Get Session for Access Control
-        const cookieStore = await cookies()
-        const sessionValue = cookieStore.get("user_session")?.value
-        let isAdmin = false;
-        let currentUserId = "";
-
-        if (sessionValue) {
-            try {
-                const session = JSON.parse(sessionValue);
-                isAdmin = session.role === "ADMIN";
-                currentUserId = session.id;
-                console.log(`[DEBUG_VIEW] Viewer: ${session.email} (ID: ${currentUserId}, Role: ${session.role})`);
-            } catch (e) { /* ignore */ }
+        const viewer = await getAuthUser()
+        if (!viewer) {
+            return { error: "Silakan login terlebih dahulu" }
         }
+        const isAdmin = viewer.role === "ADMIN";
+        const currentUserId = viewer.id;
 
         // 2. Fetch main certificate data
         const certs = await prisma.$queryRawUnsafe(
@@ -1175,6 +1123,12 @@ export async function getCertificateById(id: string) {
         }
 
         const cert = certs[0]
+
+        // Access control: owner, admin, or the user a transfer is addressed to
+        const isRecipient = !!cert.transferToEmail && cert.transferToEmail === viewer.email;
+        if (!isAdmin && cert.owner_id !== currentUserId && !isRecipient) {
+            return { error: "Anda tidak memiliki akses ke sertifikat ini" }
+        }
 
         // 2-4. Fetch Related Data in Parallel (Optimization)
         const [history, meta, conflicts] = await Promise.all([
@@ -1264,9 +1218,12 @@ export async function getCertificateById(id: string) {
 }
 
 // New helper functions for notifications
-export async function getUserNotifications(userId: string) {
+export async function getUserNotifications() {
+    const session = await getAuthUser()
+    if (!session) return { error: "Silakan login terlebih dahulu" }
+    const userId = session.id
+
     try {
-        console.log(`[ACTION] Fetching notifications for ${userId} via RAW SQL...`)
 
         // Use Raw SQL to be resilient against enum sync issues
         const notifications = await prisma.$queryRawUnsafe(
@@ -1279,8 +1236,6 @@ export async function getUserNotifications(userId: string) {
              ORDER BY n."created_at" DESC`,
             userId
         ) as any[]
-
-        console.log(`[ACTION] Found ${notifications.length} notifications for ${userId}`)
 
         const mappedNotifications = notifications.map((n: any) => ({
             ...n,
@@ -1298,24 +1253,31 @@ export async function getUserNotifications(userId: string) {
 }
 
 export async function markNotificationAsRead(notificationId: string) {
+    const session = await getAuthUser()
+    if (!session) return { error: "Silakan login terlebih dahulu" }
+
     try {
-        const notification = await prisma.notification.update({
-            where: { id: notificationId },
+        // Scoped to the caller's own notifications
+        const result = await prisma.notification.updateMany({
+            where: { id: notificationId, userId: session.id },
             data: { isRead: true },
         })
 
-        return { success: true, notification }
+        return { success: true, updated: result.count }
     } catch (error) {
         console.error("Mark notification as read error:", error)
         return { error: "Gagal menandai notifikasi" }
     }
 }
 
-export async function markAllNotificationsAsRead(userId: string) {
+export async function markAllNotificationsAsRead() {
+    const session = await getAuthUser()
+    if (!session) return { error: "Silakan login terlebih dahulu" }
+
     try {
         await prisma.notification.updateMany({
             where: {
-                userId: userId,
+                userId: session.id,
                 isRead: false,
             },
             data: { isRead: true },
@@ -1354,27 +1316,36 @@ export async function verifyCertificateImage(formData: FormData) {
 
         // 3. Decrypt/Parse Hidden Message
         let hiddenData;
-        try {
-            // Try parse as plain JSON first (for legacy/unencrypted support)
-            hiddenData = JSON.parse(revealedMessage);
-        } catch (e) {
-            // If failed, check if it's encrypted (IV:AuthTag:Ciphertext format)
-            console.log("[VERIFY] Not plain JSON, checking for AES encryption...");
+        // The payload must be encrypted (IV:AuthTag:Ciphertext). Plain JSON is rejected on purpose:
+        // anyone could embed a forged plain payload into an image.
+        {
             try {
                 const parts = revealedMessage.split(':');
                 if (parts.length === 3) {
                     const [ivHex, authTagHex, encryptedHex] = parts;
-                    const rawKey = process.env.ENCRYPTION_KEY || "a".repeat(64);
-                    const key = Buffer.from(rawKey, 'hex');
                     const iv = Buffer.from(ivHex, 'hex');
                     const authTag = Buffer.from(authTagHex, 'hex');
 
-                    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-                    decipher.setAuthTag(authTag);
+                    // GCM auth tag proves the payload was produced with our secret key and not altered.
+                    const tryDecrypt = (key: Buffer): string | null => {
+                        try {
+                            const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+                            decipher.setAuthTag(authTag);
+                            return decipher.update(encryptedHex, 'hex', 'utf8') + decipher.final('utf8');
+                        } catch {
+                            return null;
+                        }
+                    };
 
-                    // Fix: encryptedHex is a string, update expects encoding params for string input
-                    let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-                    decrypted += decipher.final('utf8');
+                    let decrypted = tryDecrypt(getEncryptionKey());
+                    if (decrypted === null) {
+                        for (const legacyKey of getLegacyDecryptionKeys()) {
+                            decrypted = tryDecrypt(legacyKey);
+                            if (decrypted !== null) break;
+                        }
+                    }
+                    if (decrypted === null) throw new Error("AES-GCM authentication failed");
+
                     hiddenData = JSON.parse(decrypted);
                     console.log("[VERIFY] AES Decryption success.");
                 } else {
@@ -1531,13 +1502,11 @@ export async function verifyCertificateImage(formData: FormData) {
 }
 
 export async function deleteCertificate(certId: string) {
-    const cookieStore = await cookies()
-    const sessionValue = cookieStore.get("user_session")?.value
+    const session = await getAuthUser()
 
-    if (!sessionValue) return { error: "Silakan login terlebih dahulu" }
+    if (!session) return { error: "Silakan login terlebih dahulu" }
 
     try {
-        const session = JSON.parse(sessionValue)
         const userId = session.id
 
         // 1. Find Certificate

@@ -1,19 +1,14 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
     const path = request.nextUrl.pathname;
-    const sessionCookie = request.cookies.get("user_session");
-    const isUserLoggedIn = !!sessionCookie;
 
-    // Helper to get session data
-    let userRole = null;
-    try {
-        if (sessionCookie) {
-            const session = JSON.parse(sessionCookie.value);
-            userRole = session.role;
-        }
-    } catch (e) { }
+    // Signature + expiry are checked, so a hand-edited cookie is treated as logged out.
+    const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+    const isUserLoggedIn = !!session;
+    const userRole = session?.role ?? null;
 
     // --- PUBLIC PATHS ---
     const isPublicPath =

@@ -100,7 +100,8 @@ erDiagram
    Buka file `.env` dan isi variabel berikut:
    - `DATABASE_URL` & `DIRECT_URL` (dari setting Database Supabase)
    - `NEXT_PUBLIC_SUPABASE_URL` & `ANON_KEY` (dari setting API Supabase)
-   - `STEGANOGRAPHY_KEY` (Generate random 32-byte hex string untuk keamanan)
+   - `STEGANOGRAPHY_KEY` (WAJIB. 32-byte hex untuk AES-256-GCM: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
+   - `SESSION_SECRET` (WAJIB. Minimal 32 karakter acak untuk menandatangani cookie sesi, generate dengan perintah yang sama)
    - `SUPABASE_SERVICE_ROLE_KEY` (Untuk akses storage admin)
 
 4. **Setup Database (Prisma)**:

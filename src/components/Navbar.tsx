@@ -35,7 +35,7 @@ export function Navbar() {
     const loadNotifications = async (userId: string) => {
         try {
             const { getUserNotifications } = await import("@/lib/actions/certificates");
-            const result = await getUserNotifications(userId);
+            const result = await getUserNotifications();
             if (result.success && result.notifications) {
                 console.log(`[NAVBAR] SUCCESS: Loaded ${result.notifications.length} notifications`);
                 setNotifications(result.notifications);
@@ -124,7 +124,7 @@ export function Navbar() {
 
         try {
             const { markAllNotificationsAsRead } = await import("@/lib/actions/certificates");
-            await markAllNotificationsAsRead(user.id);
+            await markAllNotificationsAsRead();
         } catch (e) {
             console.error(e);
         }
