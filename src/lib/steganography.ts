@@ -1,13 +1,44 @@
 import { PNG } from 'pngjs';
-import * as fs from 'fs/promises';
 
 /**
  * A simple LSB (Least Significant Bit) steganography utility for PNG images.
  * This implementation hides data in the low-order bits of the RGB channels.
+ *
+ * Layout (must stay stable - already issued certificates depend on it):
+ *   "STEGOv1" | uint32 LE message length | message bytes
+ * Bytes are written LSB-first, one bit per channel, R,G,B of each pixel in order (alpha skipped).
  */
 export class Steganography {
     private static MASK = 0xFE; // 11111110
     private static MAGIC_HEADER = "STEGOv1"; // Signature to identify valid stego data
+    private static HEADER_BYTES = Buffer.byteLength(Steganography.MAGIC_HEADER) + 4;
+
+    /** Number of payload bytes (header included) an RGBA buffer can hold. */
+    private static capacityBytes(rgba: Buffer): number {
+        return Math.floor(((rgba.length / 4) * 3) / 8);
+    }
+
+    /** Index into the RGBA buffer of the n-th usable (non-alpha) channel. */
+    private static channelIndex(n: number): number {
+        return Math.floor(n / 3) * 4 + (n % 3);
+    }
+
+    private static readByte(rgba: Buffer, byteOffset: number): number {
+        let byte = 0;
+        let ch = byteOffset * 8;
+        for (let bit = 0; bit < 8; bit++, ch++) {
+            byte |= (rgba[this.channelIndex(ch)] & 1) << bit;
+        }
+        return byte;
+    }
+
+    private static decode(inputBuffer: Buffer): PNG {
+        try {
+            return PNG.sync.read(inputBuffer);
+        } catch {
+            throw new Error('Format file corrupt atau bukan PNG valid.');
+        }
+    }
 
     /**
      * Embeds a string message into a PNG image buffer.
@@ -16,120 +47,67 @@ export class Steganography {
      * @returns A Promise resolving to the resulting PNG buffer with hidden data.
      */
     static async embed(inputBuffer: Buffer, message: string): Promise<Buffer> {
-        return new Promise((resolve, reject) => {
-            new PNG({ filterType: 4 }).parse(inputBuffer, (error, png) => {
-                if (error) return reject(error);
+        const png = this.decode(inputBuffer);
+        const data = png.data;
 
-                try {
-                    // Header: Signature + Message Size (32-bit)
-                    const headerBuffer = Buffer.from(this.MAGIC_HEADER, 'utf8');
-                    const messageBuffer = Buffer.from(message, 'utf8');
-                    const messageSize = messageBuffer.length;
+        const messageBuffer = Buffer.from(message, 'utf8');
+        const sizeBuffer = Buffer.alloc(4);
+        sizeBuffer.writeUInt32LE(messageBuffer.length, 0);
+        const fullBuffer = Buffer.concat([Buffer.from(this.MAGIC_HEADER, 'utf8'), sizeBuffer, messageBuffer]);
 
-                    const sizeBuffer = Buffer.alloc(4);
-                    sizeBuffer.writeUInt32LE(messageSize, 0);
+        const totalBitsNeeded = fullBuffer.length * 8;
+        const capacityBits = (data.length / 4) * 3;
+        if (totalBitsNeeded > capacityBits) {
+            throw new Error(`Image is too small. Needs ${totalBitsNeeded} bits, has ${capacityBits} capacity.`);
+        }
 
-                    const fullBuffer = Buffer.concat([headerBuffer, sizeBuffer, messageBuffer]);
-                    const totalBitsNeeded = fullBuffer.length * 8;
+        let ch = 0;
+        for (let i = 0; i < fullBuffer.length; i++) {
+            const byte = fullBuffer[i];
+            for (let bit = 0; bit < 8; bit++, ch++) {
+                const idx = this.channelIndex(ch);
+                data[idx] = (data[idx] & this.MASK) | ((byte >> bit) & 1);
+            }
+        }
 
-                    // Check capacity
-                    const capacityBits = (png.data.length / 4) * 3;
-
-                    if (totalBitsNeeded > capacityBits) {
-                        return reject(new Error(`Image is too small. Needs ${totalBitsNeeded} bits, has ${capacityBits} capacity.`));
-                    }
-
-                    // Prepare bit stream
-                    const bits: number[] = [];
-                    for (let i = 0; i < fullBuffer.length; i++) {
-                        const byte = fullBuffer[i];
-                        for (let bit = 0; bit < 8; bit++) {
-                            bits.push((byte >> bit) & 1);
-                        }
-                    }
-
-                    // Embed bits into RGB channels
-                    let bitIdx = 0;
-                    for (let i = 0; i < png.data.length && bitIdx < bits.length; i++) {
-                        // Skip Alpha channel (index 3, 7, 11, ...)
-                        if ((i + 1) % 4 === 0) continue;
-
-                        png.data[i] = (png.data[i] & this.MASK) | bits[bitIdx];
-                        bitIdx++;
-                    }
-
-                    // Pack back to Buffer
-                    const outputBuffer = PNG.sync.write(png);
-                    resolve(outputBuffer);
-
-                } catch (err) {
-                    reject(err);
-                }
-            });
-        });
+        return PNG.sync.write(png, { filterType: 4 });
     }
 
     /**
      * Reveals a hidden string message from a PNG image buffer.
+     * Reads only the bits it needs instead of materialising every LSB of the image.
      * @param inputBuffer - The PNG image buffer containing hidden data.
      */
     static async reveal(inputBuffer: Buffer): Promise<string> {
-        return new Promise((resolve, reject) => {
-            new PNG().parse(inputBuffer, (error, png) => {
-                if (error) return reject(new Error('Format file corrupt atau bukan PNG valid.'));
+        const data = this.decode(inputBuffer).data;
+        const capacity = this.capacityBytes(data);
+        const headerLen = Buffer.byteLength(this.MAGIC_HEADER);
 
-                try {
-                    const bits: number[] = [];
-                    // Extract all potential LSBs from RGB channels
-                    for (let i = 0; i < png.data.length; i++) {
-                        if ((i + 1) % 4 === 0) continue;
-                        bits.push(png.data[i] & 1);
-                    }
+        // 1. Check Magic Header
+        if (capacity < this.HEADER_BYTES) {
+            throw new Error('Sertifikat tidak memiliki data autentikasi (Steganografi tidak ditemukan).');
+        }
+        for (let i = 0; i < headerLen; i++) {
+            if (this.readByte(data, i) !== this.MAGIC_HEADER.charCodeAt(i)) {
+                throw new Error('Sertifikat tidak memiliki data autentikasi (Steganografi tidak ditemukan).');
+            }
+        }
 
-                    // Function to extract a byte at a specific bit offset
-                    const getByte = (bitOffset: number) => {
-                        let byte = 0;
-                        for (let i = 0; i < 8; i++) {
-                            byte |= (bits[bitOffset + i] << i);
-                        }
-                        return byte;
-                    };
+        // 2. Extract Message Size (uint32 LE)
+        const sizeBytes = Buffer.alloc(4);
+        for (let i = 0; i < 4; i++) sizeBytes[i] = this.readByte(data, headerLen + i);
+        const messageSize = sizeBytes.readUInt32LE(0);
 
-                    // 1. Check Magic Header
-                    const headerLen = this.MAGIC_HEADER.length;
-                    let extractedHeader = "";
-                    for (let i = 0; i < headerLen; i++) {
-                        extractedHeader += String.fromCharCode(getByte(i * 8));
-                    }
+        if (messageSize <= 0 || messageSize > capacity - this.HEADER_BYTES) {
+            throw new Error('Data steganografi rusak atau tidak valid.');
+        }
 
-                    if (extractedHeader !== this.MAGIC_HEADER) {
-                        return reject(new Error('Sertifikat tidak memiliki data autentikasi (Steganografi tidak ditemukan).'));
-                    }
+        // 3. Extract Message
+        const messageBuffer = Buffer.alloc(messageSize);
+        for (let i = 0; i < messageSize; i++) {
+            messageBuffer[i] = this.readByte(data, this.HEADER_BYTES + i);
+        }
 
-                    // 2. Extract Message Size
-                    let messageSize = 0;
-                    const sizeOffset = headerLen * 8;
-                    for (let i = 0; i < 4; i++) {
-                        messageSize |= (getByte(sizeOffset + (i * 8)) << (i * 8));
-                    }
-
-                    if (messageSize <= 0 || messageSize > (bits.length / 8) - headerLen - 4) {
-                        return reject(new Error('Data steganografi rusak atau tidak valid.'));
-                    }
-
-                    // 3. Extract Message
-                    const messageBuffer = Buffer.alloc(messageSize);
-                    const messageOffset = (headerLen + 4) * 8;
-                    for (let i = 0; i < messageSize; i++) {
-                        messageBuffer[i] = getByte(messageOffset + (i * 8));
-                    }
-
-                    resolve(messageBuffer.toString('utf8'));
-
-                } catch (err) {
-                    reject(err);
-                }
-            });
-        });
+        return messageBuffer.toString('utf8');
     }
 }
