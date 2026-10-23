@@ -135,8 +135,7 @@ describe("verifySeal", () => {
 
     it("rejects a signature made over bytes without the domain prefix", async () => {
         const { keyring, secretKey } = await nobleKeyring()
-        const raw = new TextEncoder().encode(`${canonicalJSON(pub)}
-${enc}`)
+        const raw = new TextEncoder().encode(`${canonicalJSON(pub)}\n${enc}`)
         const sig2 = toBase64Url(await ed.signAsync(raw, secretKey))
         assert.deepEqual(await verifySeal({ v: 2, pub, enc, sig: sig2 }, keyring), { valid: false, reason: "bad_signature" })
     })
