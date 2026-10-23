@@ -26,22 +26,35 @@ export function toBase64Url(bytes: Uint8Array): string {
     return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 
+/** Throws on invalid input; callers must validate first (parseEnvelope does). */
 export function fromBase64Url(text: string): Uint8Array {
     const padded = text.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((text.length + 3) % 4)
     return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0))
 }
 
+/** Copies exactly the five public fields; extra properties on the input are dropped. */
+export function pickPublic(pub: SealPublic): SealPublic {
+    return { certId: pub.certId, serial: pub.serial, verifiedAt: pub.verifiedAt, issuer: pub.issuer, kid: pub.kid }
+}
+
 export function buildSigningBytes(pub: SealPublic, enc: string): Uint8Array {
-    return new TextEncoder().encode(`${SEAL_DOMAIN}\n${canonicalJSON(pub)}\n${enc}`)
+    return new TextEncoder().encode(`${SEAL_DOMAIN}\n${canonicalJSON(pickPublic(pub))}\n${enc}`)
 }
 
 export function serializeEnvelope(envelope: SealEnvelope): string {
-    return JSON.stringify({ v: envelope.v, pub: envelope.pub, enc: envelope.enc, sig: envelope.sig })
+    return JSON.stringify({ v: envelope.v, pub: pickPublic(envelope.pub), enc: envelope.enc, sig: envelope.sig })
 }
 
+// Legacy v1 sealed string (case-insensitive, as historically accepted)
 const SEALED = /^[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]*$/i
-const SIG_64_BYTES = /^[A-Za-z0-9_-]{86}$/
+// v2 enc: lowercase only (Node emits lowercase), so one envelope has exactly one spelling
+const V2_ENC = /^[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]*$/
+// Canonical base64url of exactly 64 bytes: the last char carries 2 data bits, its 4 low bits must be 0
+const SIG_64_BYTES = /^[A-Za-z0-9_-]{85}[AQgw]$/
+const ENVELOPE_KEYS = "enc,pub,sig,v"
 const PUB_FIELDS = ["certId", "serial", "verifiedAt", "issuer", "kid"] as const
+
+const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x)
 
 const invalid = (reason: string): ParsedSeal => ({ kind: "invalid", reason })
 
@@ -49,30 +62,23 @@ const invalid = (reason: string): ParsedSeal => ({ kind: "invalid", reason })
 export function parseEnvelope(raw: string): ParsedSeal {
     if (SEALED.test(raw)) return { kind: "v1", sealed: raw }
 
-    let data: any
+    let data: unknown
     try {
         data = JSON.parse(raw)
     } catch {
         return invalid("not_json")
     }
-    if (!data || typeof data !== "object" || data.v !== 2) return invalid("unsupported_version")
+    if (!isRecord(data) || data.v !== 2) return invalid("unsupported_version")
+    if (Object.keys(data).sort().join(",") !== ENVELOPE_KEYS) return invalid("unexpected_field")
 
     const pub = data.pub
-    if (!pub || typeof pub !== "object" || Array.isArray(pub)) return invalid("missing_pub")
+    if (!isRecord(pub)) return invalid("missing_pub")
     for (const field of PUB_FIELDS) {
         if (typeof pub[field] !== "string" || !pub[field]) return invalid(`missing_${field}`)
     }
     if (Object.keys(pub).length !== PUB_FIELDS.length) return invalid("unexpected_pub_field")
-    if (typeof data.enc !== "string" || !SEALED.test(data.enc)) return invalid("bad_enc")
+    if (typeof data.enc !== "string" || !V2_ENC.test(data.enc)) return invalid("bad_enc")
     if (typeof data.sig !== "string" || !SIG_64_BYTES.test(data.sig)) return invalid("bad_sig")
 
-    return {
-        kind: "v2",
-        envelope: {
-            v: 2,
-            pub: { certId: pub.certId, serial: pub.serial, verifiedAt: pub.verifiedAt, issuer: pub.issuer, kid: pub.kid },
-            enc: data.enc,
-            sig: data.sig,
-        },
-    }
+    return { kind: "v2", envelope: { v: 2, pub: pickPublic(pub as SealPublic), enc: data.enc, sig: data.sig } }
 }

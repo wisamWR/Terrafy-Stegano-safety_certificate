@@ -37,6 +37,14 @@ describe("buildSigningBytes", () => {
         const reordered = { kid: pub.kid, issuer: pub.issuer, verifiedAt: pub.verifiedAt, serial: pub.serial, certId: pub.certId }
         assert.deepEqual(buildSigningBytes(reordered, enc), buildSigningBytes(pub, enc))
     })
+
+    it("is unambiguous and ignores extra fields", () => {
+        const text = new TextDecoder().decode(buildSigningBytes({ ...pub, serial: "A\nB" }, enc))
+        assert.equal(text.split("\n").length, 3)
+        const extra = { ...pub, ownerName: "Alice" } as SealPublic
+        assert.deepEqual(buildSigningBytes(extra, enc), buildSigningBytes(pub, enc))
+        assert.ok(!serializeEnvelope({ v: 2, pub: extra, enc, sig }).includes("Alice"))
+    })
 })
 
 describe("parseEnvelope", () => {
@@ -55,7 +63,7 @@ describe("parseEnvelope", () => {
     })
 
     it("rejects missing or extra pub fields", () => {
-        const { kid: _kid, ...noKid } = pub
+        const noKid = { certId: pub.certId, serial: pub.serial, verifiedAt: pub.verifiedAt, issuer: pub.issuer }
         assert.equal(parseEnvelope(JSON.stringify({ v: 2, pub: noKid, enc, sig })).kind, "invalid")
         assert.equal(parseEnvelope(JSON.stringify({ v: 2, pub: { ...pub, ownerName: "x" }, enc, sig })).kind, "invalid")
     })
@@ -64,5 +72,24 @@ describe("parseEnvelope", () => {
         assert.equal(parseEnvelope(JSON.stringify({ v: 2, pub, enc, sig: toBase64Url(new Uint8Array(10)) })).kind, "invalid")
         assert.equal(parseEnvelope(JSON.stringify({ v: 2, pub, enc: "nope", sig })).kind, "invalid")
         assert.equal(parseEnvelope("{not json").kind, "invalid")
+    })
+
+    it("rejects malformed pub values and version", () => {
+        const kind = (obj: unknown) => parseEnvelope(JSON.stringify(obj)).kind
+        assert.equal(kind({ v: 2, pub: { ...pub, serial: "" }, enc, sig }), "invalid")
+        assert.equal(kind({ v: 2, pub: { ...pub, serial: 1 }, enc, sig }), "invalid")
+        assert.equal(kind({ v: 2, pub: [pub], enc, sig }), "invalid")
+        assert.equal(kind({ v: "2", pub, enc, sig }), "invalid")
+        assert.equal(kind({ v: 1, pub, enc, sig }), "invalid")
+    })
+
+    it("rejects non-canonical encodings", () => {
+        const kind = (obj: unknown) => parseEnvelope(JSON.stringify(obj)).kind
+        assert.equal(kind({ v: 2, pub, enc: enc.toUpperCase(), sig }), "invalid")
+        assert.equal(kind({ v: 2, pub, enc: enc + "\n", sig }), "invalid")
+        assert.equal(kind({ v: 2, pub, enc, sig, x: 1 }), "invalid")
+        const malleable = sig.slice(0, -1) + "x"
+        assert.deepEqual(fromBase64Url(malleable), fromBase64Url(sig))
+        assert.equal(kind({ v: 2, pub, enc, sig: malleable }), "invalid")
     })
 })
