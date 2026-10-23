@@ -12,8 +12,7 @@ export type Keyring = {
 export const DEFAULT_KEYRING: Keyring = {
     activeKid: "terrafy-2026-1",
     publicKeys: {
-        // Replaced with the real key in Task 4 Step 4.
-        "terrafy-2026-1": "0000000000000000000000000000000000000000000000000000000000000000",
+        "terrafy-2026-1": "fbcd3e8077c005bf3219e227cd95300a8701d79eb60452fbf0704d65781a88ff",
     },
     revokedKids: [],
 }

@@ -7,6 +7,8 @@ import {
 import * as ed from "@noble/ed25519"
 import { verifySeal } from "../src/lib/seal/verify"
 import { DEFAULT_KEYRING, type Keyring } from "../src/lib/seal/public-keys"
+import { randomBytes } from "node:crypto"
+import { publicKeyHexOf, signSeal, signingKeyFromSeed } from "../src/lib/seal/sign"
 
 const pub: SealPublic = { certId: "c1", serial: "SHM-001", verifiedAt: "2026-10-23T08:00:00.000Z", issuer: "Terrafy", kid: "test-1" }
 const enc = "00112233445566778899aabb:00112233445566778899aabbccddeeff:abcdef"
@@ -161,5 +163,38 @@ describe("DEFAULT_KEYRING", () => {
         for (const hex of Object.values(DEFAULT_KEYRING.publicKeys)) assert.match(hex, /^[0-9a-f]{64}$/)
         assert.ok(Object.hasOwn(DEFAULT_KEYRING.publicKeys, DEFAULT_KEYRING.activeKid))
         assert.ok(!DEFAULT_KEYRING.revokedKids.includes(DEFAULT_KEYRING.activeKid))
+    })
+})
+
+describe("signSeal (Node crypto)", () => {
+    const seed = randomBytes(32).toString("hex")
+    const keyring: Keyring = { activeKid: "test-1", publicKeys: { "test-1": publicKeyHexOf(signingKeyFromSeed(seed)) }, revokedKids: [] }
+
+    it("produces signatures that @noble verifies", async () => {
+        process.env.SEAL_SIGNING_KEY = seed
+        const sig2 = signSeal(pub, enc, keyring)
+        assert.deepEqual(await verifySeal({ v: 2, pub, enc, sig: sig2 }, keyring), { valid: true, pub })
+    })
+
+    it("derives the same public key as @noble", async () => {
+        const noblePub = await ed.getPublicKeyAsync(ed.etc.hexToBytes(seed))
+        assert.equal(ed.etc.bytesToHex(noblePub), keyring.publicKeys["test-1"])
+    })
+
+    it("refuses a seed that does not match the kid's public key", () => {
+        process.env.SEAL_SIGNING_KEY = randomBytes(32).toString("hex")
+        assert.throws(() => signSeal(pub, enc, keyring), /tidak cocok/)
+    })
+
+    it("refuses to sign for a kid that is not active", () => {
+        process.env.SEAL_SIGNING_KEY = seed
+        assert.throws(() => signSeal({ ...pub, kid: "old" }, enc, { ...keyring, publicKeys: { ...keyring.publicKeys, old: keyring.publicKeys["test-1"] } }), /aktif/)
+    })
+
+    it("refuses a missing or malformed SEAL_SIGNING_KEY", () => {
+        delete process.env.SEAL_SIGNING_KEY
+        assert.throws(() => signSeal(pub, enc, keyring), /SEAL_SIGNING_KEY/)
+        process.env.SEAL_SIGNING_KEY = "abc"
+        assert.throws(() => signSeal(pub, enc, keyring), /SEAL_SIGNING_KEY/)
     })
 })
