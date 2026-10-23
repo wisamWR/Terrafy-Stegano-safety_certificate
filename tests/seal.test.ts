@@ -4,6 +4,9 @@ import {
     buildSigningBytes, canonicalJSON, fromBase64Url, parseEnvelope, serializeEnvelope, toBase64Url,
     type SealPublic,
 } from "../src/lib/seal/envelope"
+import * as ed from "@noble/ed25519"
+import { verifySeal } from "../src/lib/seal/verify"
+import type { Keyring } from "../src/lib/seal/public-keys"
 
 const pub: SealPublic = { certId: "c1", serial: "SHM-001", verifiedAt: "2026-10-23T08:00:00.000Z", issuer: "Terrafy", kid: "test-1" }
 const enc = "00112233445566778899aabb:00112233445566778899aabbccddeeff:abcdef"
@@ -91,5 +94,49 @@ describe("parseEnvelope", () => {
         const malleable = sig.slice(0, -1) + "x"
         assert.deepEqual(fromBase64Url(malleable), fromBase64Url(sig))
         assert.equal(kind({ v: 2, pub, enc, sig: malleable }), "invalid")
+    })
+})
+
+async function nobleKeyring(kid = "test-1") {
+    const { secretKey, publicKey } = await ed.keygenAsync()
+    const keyring: Keyring = { activeKid: kid, publicKeys: { [kid]: ed.etc.bytesToHex(publicKey) }, revokedKids: [] }
+    const signEnvelope = async (p: SealPublic, e: string) => toBase64Url(await ed.signAsync(buildSigningBytes(p, e), secretKey))
+    return { keyring, secretKey, signEnvelope }
+}
+
+describe("verifySeal", () => {
+    it("accepts a correctly signed envelope", async () => {
+        const { keyring, signEnvelope } = await nobleKeyring()
+        const verdict = await verifySeal({ v: 2, pub, enc, sig: await signEnvelope(pub, enc) }, keyring)
+        assert.deepEqual(verdict, { valid: true, pub })
+    })
+
+    it("rejects any change to pub, enc or sig", async () => {
+        const { keyring, signEnvelope } = await nobleKeyring()
+        const good = await signEnvelope(pub, enc)
+        const flipped = fromBase64Url(good); flipped[10] ^= 1
+        for (const env of [
+            { v: 2 as const, pub: { ...pub, serial: "SHM-002" }, enc, sig: good },
+            { v: 2 as const, pub, enc: enc.slice(0, -1) + "e", sig: good },
+            { v: 2 as const, pub, enc, sig: toBase64Url(flipped) },
+        ]) {
+            assert.deepEqual(await verifySeal(env, keyring), { valid: false, reason: "bad_signature" })
+        }
+    })
+
+    it("rejects unknown and revoked kids", async () => {
+        const { keyring, signEnvelope } = await nobleKeyring()
+        const sig2 = await signEnvelope(pub, enc)
+        assert.deepEqual(await verifySeal({ v: 2, pub: { ...pub, kid: "other" }, enc, sig: sig2 }, keyring), { valid: false, reason: "unknown_kid" })
+        assert.deepEqual(await verifySeal({ v: 2, pub: { ...pub, kid: "constructor" }, enc, sig: sig2 }, keyring), { valid: false, reason: "unknown_kid" })
+        assert.deepEqual(await verifySeal({ v: 2, pub, enc, sig: sig2 }, { ...keyring, revokedKids: ["test-1"] }), { valid: false, reason: "revoked_kid" })
+    })
+
+    it("rejects a signature made over bytes without the domain prefix", async () => {
+        const { keyring, secretKey } = await nobleKeyring()
+        const raw = new TextEncoder().encode(`${canonicalJSON(pub)}
+${enc}`)
+        const sig2 = toBase64Url(await ed.signAsync(raw, secretKey))
+        assert.deepEqual(await verifySeal({ v: 2, pub, enc, sig: sig2 }, keyring), { valid: false, reason: "bad_signature" })
     })
 })
