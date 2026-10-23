@@ -6,7 +6,7 @@ import {
 } from "../src/lib/seal/envelope"
 import * as ed from "@noble/ed25519"
 import { verifySeal } from "../src/lib/seal/verify"
-import type { Keyring } from "../src/lib/seal/public-keys"
+import { DEFAULT_KEYRING, type Keyring } from "../src/lib/seal/public-keys"
 
 const pub: SealPublic = { certId: "c1", serial: "SHM-001", verifiedAt: "2026-10-23T08:00:00.000Z", issuer: "Terrafy", kid: "test-1" }
 const enc = "00112233445566778899aabb:00112233445566778899aabbccddeeff:abcdef"
@@ -114,7 +114,8 @@ describe("verifySeal", () => {
     it("rejects any change to pub, enc or sig", async () => {
         const { keyring, signEnvelope } = await nobleKeyring()
         const good = await signEnvelope(pub, enc)
-        const flipped = fromBase64Url(good); flipped[10] ^= 1
+        const flipped = fromBase64Url(good)
+        flipped[10] ^= 1
         for (const env of [
             { v: 2 as const, pub: { ...pub, serial: "SHM-002" }, enc, sig: good },
             { v: 2 as const, pub, enc: enc.slice(0, -1) + "e", sig: good },
@@ -138,5 +139,28 @@ describe("verifySeal", () => {
 ${enc}`)
         const sig2 = toBase64Url(await ed.signAsync(raw, secretKey))
         assert.deepEqual(await verifySeal({ v: 2, pub, enc, sig: sig2 }, keyring), { valid: false, reason: "bad_signature" })
+    })
+    it("rejects the small-order forgery (R=identity, S=0) against an all-zero key", async () => {
+        const forged = new Uint8Array(64)
+        forged[0] = 1
+        const zeroRing: Keyring = { activeKid: "test-1", publicKeys: { "test-1": "00".repeat(32) }, revokedKids: [] }
+        assert.deepEqual(await verifySeal({ v: 2, pub, enc, sig: toBase64Url(forged) }, zeroRing), { valid: false, reason: "bad_signature" })
+    })
+
+    it("reports a malformed keyring entry as verifier_unavailable, never throwing", async () => {
+        const { signEnvelope } = await nobleKeyring()
+        const good = await signEnvelope(pub, enc)
+        for (const bad of ["zz".repeat(32), "abcd", "AB".repeat(32)]) {
+            const ring: Keyring = { activeKid: "test-1", publicKeys: { "test-1": bad }, revokedKids: [] }
+            assert.deepEqual(await verifySeal({ v: 2, pub, enc, sig: good }, ring), { valid: false, reason: "verifier_unavailable" })
+        }
+    })
+})
+
+describe("DEFAULT_KEYRING", () => {
+    it("is well-formed: lowercase 32-byte hex keys, active kid present and not revoked", () => {
+        for (const hex of Object.values(DEFAULT_KEYRING.publicKeys)) assert.match(hex, /^[0-9a-f]{64}$/)
+        assert.ok(Object.hasOwn(DEFAULT_KEYRING.publicKeys, DEFAULT_KEYRING.activeKid))
+        assert.ok(!DEFAULT_KEYRING.revokedKids.includes(DEFAULT_KEYRING.activeKid))
     })
 })
