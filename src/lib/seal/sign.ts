@@ -26,6 +26,7 @@ export function publicKeyHexOf(privateKey: KeyObject): string {
 /** Signs a v2 envelope with SEAL_SIGNING_KEY after checking it is the keyring's active key. */
 export function signSeal(pub: SealPublic, enc: string, keyring: Keyring = DEFAULT_KEYRING): string {
     if (pub.kid !== keyring.activeKid) throw new Error(`kid "${pub.kid}" bukan kunci aktif (${keyring.activeKid})`)
+    if (keyring.revokedKids.includes(keyring.activeKid)) throw new Error(`kid aktif "${keyring.activeKid}" telah dicabut; rotasi kunci dulu`)
     const key = signingKeyFromSeed(process.env.SEAL_SIGNING_KEY)
     const expected = Object.hasOwn(keyring.publicKeys, keyring.activeKid) ? keyring.publicKeys[keyring.activeKid] : undefined
     if (!expected || publicKeyHexOf(key) !== expected.toLowerCase()) {

@@ -1,4 +1,4 @@
-import { describe, it } from "node:test"
+import { after, describe, it } from "node:test"
 import assert from "node:assert/strict"
 import {
     buildSigningBytes, canonicalJSON, fromBase64Url, parseEnvelope, serializeEnvelope, toBase64Url,
@@ -167,6 +167,11 @@ describe("DEFAULT_KEYRING", () => {
 })
 
 describe("signSeal (Node crypto)", () => {
+    const savedSeed = process.env.SEAL_SIGNING_KEY
+    after(() => {
+        if (savedSeed === undefined) delete process.env.SEAL_SIGNING_KEY
+        else process.env.SEAL_SIGNING_KEY = savedSeed
+    })
     const seed = randomBytes(32).toString("hex")
     const keyring: Keyring = { activeKid: "test-1", publicKeys: { "test-1": publicKeyHexOf(signingKeyFromSeed(seed)) }, revokedKids: [] }
 
@@ -189,6 +194,11 @@ describe("signSeal (Node crypto)", () => {
     it("refuses to sign for a kid that is not active", () => {
         process.env.SEAL_SIGNING_KEY = seed
         assert.throws(() => signSeal({ ...pub, kid: "old" }, enc, { ...keyring, publicKeys: { ...keyring.publicKeys, old: keyring.publicKeys["test-1"] } }), /aktif/)
+    })
+
+    it("refuses to sign when the active kid is revoked", () => {
+        process.env.SEAL_SIGNING_KEY = seed
+        assert.throws(() => signSeal(pub, enc, { ...keyring, revokedKids: ["test-1"] }), /dicabut/)
     })
 
     it("refuses a missing or malformed SEAL_SIGNING_KEY", () => {
