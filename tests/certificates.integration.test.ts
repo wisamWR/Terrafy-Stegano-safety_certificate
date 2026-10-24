@@ -20,6 +20,7 @@ if (!TEST_DB) {
     process.env.NEXT_PUBLIC_SUPABASE_URL = SUPABASE_URL
     process.env.STEGANOGRAPHY_KEY = randomBytes(32).toString("hex")
     delete process.env.ALLOW_LEGACY_STEGO_KEY
+    process.env.SEAL_SIGNING_KEY = randomBytes(32).toString("hex")
 
     let prisma: typeof import("../src/lib/prisma").default
     let registration: typeof import("../src/lib/certificates/registration")
@@ -30,6 +31,9 @@ if (!TEST_DB) {
     let verification: typeof import("../src/lib/certificates/verification")
     let payload: typeof import("../src/lib/certificates/payload")
     let Steganography: typeof import("../src/lib/steganography").Steganography
+    let envelope: typeof import("../src/lib/seal/envelope")
+    let verifySeal: typeof import("../src/lib/seal/verify").verifySeal
+    let keyring: import("../src/lib/seal/public-keys").Keyring
     type Actor = import("../src/lib/certificates/common").Actor
     type CertificateStorage = import("../src/lib/certificates/storage").CertificateStorage
 
@@ -84,7 +88,7 @@ if (!TEST_DB) {
     async function verifiedCertificateOf(owner: Actor, nomor = "SHM-001") {
         const created = await registration.createCertificate(owner, input({ nomorSertifikat: nomor }), storage)
         assert.ok(created.success, JSON.stringify(created))
-        const reviewed = await approval.reviewCertificate(admin, created.certificate.id, "VERIFIED", undefined, storage)
+        const reviewed = await approval.reviewCertificate(admin, created.certificate.id, "VERIFIED", undefined, storage, keyring)
         assert.ok(reviewed.success, JSON.stringify(reviewed))
         return prisma.certificate.findUniqueOrThrow({ where: { id: created.certificate.id } })
     }
@@ -99,6 +103,14 @@ if (!TEST_DB) {
         verification = await import("../src/lib/certificates/verification")
         payload = await import("../src/lib/certificates/payload")
         Steganography = (await import("../src/lib/steganography")).Steganography
+        envelope = await import("../src/lib/seal/envelope")
+        verifySeal = (await import("../src/lib/seal/verify")).verifySeal
+        const sign = await import("../src/lib/seal/sign")
+        keyring = {
+            activeKid: "test-1",
+            publicKeys: { "test-1": sign.publicKeyHexOf(sign.signingKeyFromSeed(process.env.SEAL_SIGNING_KEY!)) },
+            revokedKids: [],
+        }
     })
 
     beforeEach(async () => {
@@ -182,20 +194,44 @@ if (!TEST_DB) {
 
             const meta = await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: cert.id } })
             assert.equal(meta.encryptionAlgo, "AES-256-GCM")
+            assert.equal(meta.sealVersion, 2)
+            assert.equal(meta.signingKeyId, "test-1")
 
             const revealed = await Steganography.reveal(storage.verifiedImage(cert.image_url!))
-            assert.ok(!revealed.includes(alice.id), "payload is not plaintext")
-            const opened = payload.openPayload(revealed)!
-            assert.equal(opened.ownerId, alice.id)
-            assert.equal(payload.hashPayload(opened), meta.hashValue)
+            const parsed = envelope.parseEnvelope(revealed)
+            assert.equal(parsed.kind, "v2")
+            if (parsed.kind !== "v2") return
+            assert.equal(meta.signature, parsed.envelope.sig)
+            assert.deepEqual(await verifySeal(parsed.envelope, keyring), { valid: true, pub: parsed.envelope.pub })
+            assert.equal(parsed.envelope.pub.serial, "SHM-001")
+            assert.ok(!revealed.includes(alice.id), "owner id only inside the encrypted part")
+
+            const secret = payload.openPayload(parsed.envelope.enc)!
+            assert.equal(secret.ownerId, alice.id)
+            assert.equal(payload.hashPayload(secret), meta.hashValue)
 
             assert.equal(await prisma.adminAuditLog.count({ where: { action: "APPROVE_CERT" } }), 1)
             assert.equal(await prisma.notification.count({ where: { userId: alice.id, type: "CERTIFICATE_VERIFIED" } }), 1)
         })
 
+        it("fails to seal without SEAL_SIGNING_KEY, then succeeds on re-approval once it is set", async () => {
+            const saved = process.env.SEAL_SIGNING_KEY
+            const { certificate } = (await registration.createCertificate(alice, input(), storage)) as any
+            delete process.env.SEAL_SIGNING_KEY
+            const first = await approval.reviewCertificate(admin, certificate.id, "VERIFIED", undefined, storage, keyring)
+            process.env.SEAL_SIGNING_KEY = saved
+            assert.equal(first.success, false)
+            assert.match((first as any).error, /SEAL_SIGNING_KEY/)
+            assert.equal((await prisma.certificate.findUniqueOrThrow({ where: { id: certificate.id } })).status, "VERIFIED")
+            assert.equal(await prisma.steganographyMetadata.count(), 0)
+
+            assert.ok((await approval.reviewCertificate(admin, certificate.id, "VERIFIED", undefined, storage, keyring)).success)
+            assert.equal((await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: certificate.id } })).sealVersion, 2)
+        })
+
         it("rejects with a reason and does not seal", async () => {
             const { certificate } = (await registration.createCertificate(alice, input(), storage)) as any
-            const res = await approval.reviewCertificate(admin, certificate.id, "REJECTED", "Data tidak cocok", storage)
+            const res = await approval.reviewCertificate(admin, certificate.id, "REJECTED", "Data tidak cocok", storage, keyring)
             assert.ok(res.success)
             const cert = await prisma.certificate.findUniqueOrThrow({ where: { id: certificate.id } })
             assert.equal(cert.status, "REJECTED")
@@ -208,7 +244,7 @@ if (!TEST_DB) {
             await prisma.steganographyMetadata.deleteMany()
             const historyBefore = await prisma.history.count()
 
-            assert.ok((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage)).success)
+            assert.ok((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage, keyring)).success)
             assert.equal(await prisma.steganographyMetadata.count(), 1)
             assert.equal(await prisma.history.count(), historyBefore)
         })
@@ -216,7 +252,7 @@ if (!TEST_DB) {
         it("refuses to seal from a location outside our storage", async () => {
             const { certificate } = (await registration.createCertificate(alice, input(), storage)) as any
             await prisma.certificate.update({ where: { id: certificate.id }, data: { image_url: "../../.env" } })
-            const res = await approval.reviewCertificate(admin, certificate.id, "VERIFIED", undefined, storage)
+            const res = await approval.reviewCertificate(admin, certificate.id, "VERIFIED", undefined, storage, keyring)
             assert.equal(res.success, false)
             assert.match((res as any).error, /tidak diizinkan/)
         })
@@ -272,12 +308,12 @@ if (!TEST_DB) {
 
             assert.equal((await transfer.acceptTransfer(carol, cert.id)).success, false)
             // Admin cannot jump in before the recipient answered
-            assert.equal((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage)).success, false)
+            assert.equal((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage, keyring)).success, false)
 
             assert.ok((await transfer.acceptTransfer(bob, cert.id)).success)
             assert.equal((await transfer.acceptTransfer(bob, cert.id)).success, false, "cannot replay")
 
-            assert.ok((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage)).success)
+            assert.ok((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage, keyring)).success)
             const after = await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })
             assert.equal(after.ownerId, bob.id)
             assert.equal(after.status, "VERIFIED")
@@ -285,12 +321,12 @@ if (!TEST_DB) {
             assert.notEqual(after.image_url, cert.image_url, "new seal image issued")
             assert.equal(await prisma.history.count({ where: { certificateId: cert.id, action: "Pengalihan Hak" } }), 1)
 
-            const current = await verification.verifyCertificateImage(storage.verifiedImage(after.image_url!), storage)
+            const current = await verification.verifyCertificateImage(storage.verifiedImage(after.image_url!), storage, keyring)
             assert.ok(current.success)
             assert.equal(current.isOwnerMatch, true)
             assert.equal(current.ownerEmail, "bob@test.id")
 
-            const stale = await verification.verifyCertificateImage(oldImage, storage)
+            const stale = await verification.verifyCertificateImage(oldImage, storage, keyring)
             assert.ok(stale.success)
             assert.equal(stale.isOwnerMatch, false)
             assert.equal(stale.ownerEmail, "Privasi Dilindungi")
@@ -304,7 +340,7 @@ if (!TEST_DB) {
             const handOver = async (from: Actor, to: Actor) => {
                 assert.ok((await transfer.requestTransfer(from, cert.id, to.email, "Jual Beli")).success)
                 assert.ok((await transfer.acceptTransfer(to, cert.id)).success)
-                assert.ok((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage)).success)
+                assert.ok((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage, keyring)).success)
             }
             await handOver(alice, bob)
             await handOver(bob, alice)
@@ -312,11 +348,11 @@ if (!TEST_DB) {
             const latest = await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })
             assert.equal(latest.ownerId, alice.id)
 
-            const old = await verification.verifyCertificateImage(firstAliceImage, storage)
+            const old = await verification.verifyCertificateImage(firstAliceImage, storage, keyring)
             assert.ok(old.success)
             assert.equal(old.isOwnerMatch, false, "first seal was superseded")
 
-            const current = await verification.verifyCertificateImage(storage.verifiedImage(latest.image_url!), storage)
+            const current = await verification.verifyCertificateImage(storage.verifiedImage(latest.image_url!), storage, keyring)
             assert.ok(current.success)
             assert.equal(current.isOwnerMatch, true)
         })
@@ -338,7 +374,7 @@ if (!TEST_DB) {
             const cert = await verifiedCertificateOf(alice)
             await transfer.requestTransfer(alice, cert.id, "bob@test.id", "Jual Beli")
             await transfer.acceptTransfer(bob, cert.id)
-            assert.ok((await approval.reviewCertificate(admin, cert.id, "REJECTED", undefined, storage)).success)
+            assert.ok((await approval.reviewCertificate(admin, cert.id, "REJECTED", undefined, storage, keyring)).success)
 
             const after = await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })
             assert.equal(after.status, "VERIFIED")
@@ -359,7 +395,7 @@ if (!TEST_DB) {
     describe("public verification", () => {
         it("accepts a genuine sealed image", async () => {
             const cert = await verifiedCertificateOf(alice)
-            const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage)
+            const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, keyring)
             assert.ok(res.success)
             assert.equal(res.isOwnerMatch, true)
             assert.equal(res.certificate.nomor, "SHM-001")
@@ -368,7 +404,7 @@ if (!TEST_DB) {
         it("rejects an image with a forged plain-JSON payload", async () => {
             const cert = await verifiedCertificateOf(alice)
             const forged = await Steganography.embed(png(), JSON.stringify({ certId: cert.id, ownerId: bob.id, serial: "SHM-001" }))
-            const res = await verification.verifyCertificateImage(forged, storage)
+            const res = await verification.verifyCertificateImage(forged, storage, keyring)
             assert.equal(res.success, false)
         })
 
@@ -379,7 +415,7 @@ if (!TEST_DB) {
                 { certId: cert.id, ownerId: bob.id, ownerName: "bob", verifiedAt: new Date().toISOString(), validator: "x", serial: "SHM-001", transactionType: "x", history: [] },
                 legacyKey,
             )
-            const res = await verification.verifyCertificateImage(await Steganography.embed(png(), sealed), storage)
+            const res = await verification.verifyCertificateImage(await Steganography.embed(png(), sealed), storage, keyring)
             assert.equal(res.success, false)
         })
 
@@ -389,12 +425,12 @@ if (!TEST_DB) {
             // Channel 1000 lies inside the ciphertext (header is 88 channels, iv+tag ~ 470)
             const idx = Math.floor(1000 / 3) * 4 + (1000 % 3)
             img.data[idx] ^= 1
-            const res = await verification.verifyCertificateImage(PNG.sync.write(img), storage)
+            const res = await verification.verifyCertificateImage(PNG.sync.write(img), storage, keyring)
             assert.equal(res.success, false)
         })
 
         it("rejects an image with no hidden data", async () => {
-            const res = await verification.verifyCertificateImage(png(), storage)
+            const res = await verification.verifyCertificateImage(png(), storage, keyring)
             assert.equal(res.success, false)
         })
     })

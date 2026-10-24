@@ -1,10 +1,10 @@
 import type { Prisma } from "@prisma/client"
 import prisma from "@/lib/prisma"
-import { Steganography } from "@/lib/steganography"
 import { type Actor, fail } from "./common"
-import { type CertificatePayload, hashPayload, sealPayload } from "./payload"
+import { DEFAULT_KEYRING, type Keyring } from "@/lib/seal/public-keys"
 import { getCertificateDetail } from "./queries"
-import { type CertificateStorage, PENDING_BUCKET, readImage, resolveImageSource } from "./storage"
+import { createSealedImage, loadSealSubject } from "./sealing"
+import { type CertificateStorage, PENDING_BUCKET } from "./storage"
 
 export type ReviewDecision = "VERIFIED" | "REJECTED"
 
@@ -22,6 +22,7 @@ export async function reviewCertificate(
     decision: ReviewDecision,
     note: string | undefined,
     storage: CertificateStorage,
+    keyring: Keyring = DEFAULT_KEYRING,
 ) {
     const existing = await prisma.certificate.findUnique({
         where: { id: certId },
@@ -44,7 +45,7 @@ export async function reviewCertificate(
     }
 
     if (decision === "VERIFIED") {
-        const sealed = await issueSealIfMissing(admin, certId, storage)
+        const sealed = await issueSealIfMissing(admin, certId, storage, keyring)
         if ("error" in sealed) return sealed
     }
 
@@ -129,61 +130,34 @@ async function applyDecision(
     })
 }
 
-/** Builds the encrypted payload, hides it in the certificate image and records the seal. */
-async function issueSealIfMissing(admin: Actor, certId: string, storage: CertificateStorage) {
-    const cert = await prisma.certificate.findUniqueOrThrow({
-        where: { id: certId },
-        include: {
-            owner: { select: { name: true } },
-            history: { orderBy: { createdAt: "asc" }, select: { action: true, owner_name: true, createdAt: true } },
-            steganographyMetadata: { select: { id: true }, take: 1 },
-        },
-    })
+/** Issues a signed v2 seal if the certificate has an image and no seal yet. */
+async function issueSealIfMissing(admin: Actor, certId: string, storage: CertificateStorage, keyring: Keyring) {
+    const cert = await loadSealSubject(certId)
+    if (!cert) return fail("Sertifikat tidak ditemukan")
     if (cert.steganographyMetadata.length > 0 || !cert.image_url) return { success: true as const }
 
     try {
-        const source = resolveImageSource(cert.image_url)
-        if (!source) throw new Error("Lokasi gambar sertifikat tidak dikenali atau tidak diizinkan")
-        const cover = await readImage(storage, source)
-
-        // Key order is part of the hash contract (see payload.ts)
-        const payload: CertificatePayload = {
-            certId: cert.id,
-            ownerId: cert.ownerId,
-            ownerName: cert.owner.name,
-            verifiedAt: (cert.verifiedAt ?? new Date()).toISOString(),
-            validator: admin.name || "Admin",
-            serial: cert.nomor_sertifikat,
-            transactionType: cert.transferReason || "Initial Registration",
-            history: cert.history.map((h) => ({ a: h.action, o: h.owner_name, d: h.createdAt.toISOString() })),
-        }
-
-        const stego = await Steganography.embed(cover, sealPayload(payload))
-        const objectPath = `verified/verified_${Date.now()}_${cert.nomor_sertifikat.replace(/[^a-z0-9]/gi, "_")}.png`
-        const publicUrl = await storage.uploadVerified(objectPath, stego)
+        const sealed = await createSealedImage(admin.name || "Admin", cert, storage, keyring)
 
         await prisma.$transaction([
             prisma.steganographyMetadata.create({
                 data: {
                     certificateId: cert.id,
                     originalImage: cert.image_url,
-                    stegoImage: publicUrl,
-                    algorithm: "LSB (RGB)",
-                    encryptionAlgo: "AES-256-GCM",
-                    encryptionKey: "PROTECTED",
-                    hashValue: hashPayload(payload),
+                    stegoImage: sealed.publicUrl,
                     createdBy: admin.id,
                     lastVerified: new Date(),
+                    ...sealed.metadata,
                 },
             }),
             prisma.certificate.update({
                 where: { id: cert.id },
-                data: { image_url: publicUrl, stegoImageUrl: publicUrl },
+                data: { image_url: sealed.publicUrl, stegoImageUrl: sealed.publicUrl },
             }),
         ])
 
-        if (source.kind === "bucket" && source.bucket === PENDING_BUCKET) {
-            await storage.removePending(source.path).catch(() => {})
+        if (sealed.source.kind === "bucket" && sealed.source.bucket === PENDING_BUCKET) {
+            await storage.removePending(sealed.source.path).catch(() => {})
         }
         return { success: true as const }
     } catch (error) {

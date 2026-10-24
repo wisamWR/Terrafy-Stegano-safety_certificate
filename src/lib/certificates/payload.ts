@@ -1,7 +1,7 @@
 import * as crypto from "crypto"
 import { getEncryptionKey, getLegacyDecryptionKeys } from "@/lib/crypto-key"
 
-/** Data sealed inside a verified certificate image. Field order matters: the stored hash is over JSON.stringify. */
+/** v1 seal payload (legacy, whole payload encrypted). Field order matters: the stored hash is over JSON.stringify. */
 export type CertificatePayload = {
     certId: string
     ownerId: string
@@ -13,12 +13,21 @@ export type CertificatePayload = {
     history: { a: string; o: string | null; d: string }[]
 }
 
+/** Private part of a v2 seal, encrypted into `enc`. Identity fields live in the signed public part. */
+export type SealPrivate = {
+    ownerId: string
+    ownerName: string | null
+    validator: string
+    transactionType: string
+    history: { a: string; o: string | null; d: string }[]
+}
+
 export function hashPayload(payload: unknown): string {
     return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex")
 }
 
 /** AES-256-GCM, serialized as `ivHex:authTagHex:ciphertextHex`. */
-export function sealPayload(payload: CertificatePayload, key: Buffer = getEncryptionKey()): string {
+export function sealPayload(payload: object, key: Buffer = getEncryptionKey()): string {
     const iv = crypto.randomBytes(12)
     const cipher = crypto.createCipheriv("aes-256-gcm", key, iv)
     const encrypted = cipher.update(JSON.stringify(payload), "utf8", "hex") + cipher.final("hex")
