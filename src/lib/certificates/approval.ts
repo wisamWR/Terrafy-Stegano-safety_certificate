@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client"
 import prisma from "@/lib/prisma"
 import { type Actor, fail } from "./common"
 import { DEFAULT_KEYRING, type Keyring } from "@/lib/seal/public-keys"
+import { assertSigningReady } from "@/lib/seal/sign"
 import { getCertificateDetail } from "./queries"
 import { createSealedImage, loadSealSubject } from "./sealing"
 import { type CertificateStorage, PENDING_BUCKET } from "./storage"
@@ -31,6 +32,15 @@ export async function reviewCertificate(
     if (!existing) return fail("Sertifikat tidak ditemukan")
     if (existing.status === "AWAITING_RECIPIENT") {
         return fail("Transfer masih menunggu konfirmasi penerima")
+    }
+
+    // Fail before any state change: a half-approved certificate would lose its notification and audit entry
+    if (decision === "VERIFIED" && existing.image_url) {
+        try {
+            assertSigningReady(keyring)
+        } catch (error) {
+            return fail("Gagal menerbitkan segel: " + (error as Error).message)
+        }
     }
 
     const hasSeal = existing.steganographyMetadata.length > 0
@@ -163,7 +173,7 @@ async function issueSealIfMissing(admin: Actor, certId: string, storage: Certifi
     } catch (error) {
         console.error("[STEGO] Embedding failed:", error)
         // Status is already VERIFIED; re-approving retries the seal
-        return fail("Gagal menyisipkan steganografi: " + (error as Error).message)
+        return fail("Gagal menerbitkan segel: " + (error as Error).message)
     }
 }
 

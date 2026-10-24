@@ -27,7 +27,7 @@ export function hashPayload(payload: unknown): string {
 }
 
 /** AES-256-GCM, serialized as `ivHex:authTagHex:ciphertextHex`. */
-export function sealPayload(payload: object, key: Buffer = getEncryptionKey()): string {
+export function sealPayload(payload: CertificatePayload | SealPrivate, key: Buffer = getEncryptionKey()): string {
     const iv = crypto.randomBytes(12)
     const cipher = crypto.createCipheriv("aes-256-gcm", key, iv)
     const encrypted = cipher.update(JSON.stringify(payload), "utf8", "hex") + cipher.final("hex")

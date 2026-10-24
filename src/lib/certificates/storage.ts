@@ -79,7 +79,7 @@ export function supabaseStorage(): CertificateStorage {
         },
         async uploadVerified(objectPath, data) {
             const client = await admin()
-            const { error } = await client.storage.from(VERIFIED_BUCKET).upload(objectPath, data, { contentType: "image/png", upsert: true })
+            const { error } = await client.storage.from(VERIFIED_BUCKET).upload(objectPath, data, { contentType: "image/png", upsert: false })
             if (error) throw new Error(`Gagal upload sertifikat terverifikasi: ${error.message}`)
             return client.storage.from(VERIFIED_BUCKET).getPublicUrl(objectPath).data.publicUrl
         },

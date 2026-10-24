@@ -1,6 +1,7 @@
+import { randomUUID } from "crypto"
 import prisma from "@/lib/prisma"
 import { Steganography } from "@/lib/steganography"
-import { serializeEnvelope, type SealPublic } from "@/lib/seal/envelope"
+import { SEAL_ISSUER, serializeEnvelope, type SealPublic } from "@/lib/seal/envelope"
 import { DEFAULT_KEYRING, type Keyring } from "@/lib/seal/public-keys"
 import { signSeal } from "@/lib/seal/sign"
 import { hashPayload, sealPayload, type SealPrivate } from "./payload"
@@ -13,6 +14,7 @@ export function loadSealSubject(certId: string) {
         include: {
             owner: { select: { name: true } },
             history: { orderBy: { createdAt: "asc" }, select: { action: true, owner_name: true, createdAt: true } },
+            // sealVersion is read by the reissue flow
             steganographyMetadata: { select: { id: true, sealVersion: true }, take: 1 },
         },
     })
@@ -53,7 +55,7 @@ export async function createSealedImage(
         certId: cert.id,
         serial: cert.nomor_sertifikat,
         verifiedAt: (cert.verifiedAt ?? new Date()).toISOString(),
-        issuer: "Terrafy",
+        issuer: SEAL_ISSUER,
         kid: keyring.activeKid,
     }
     const secret: SealPrivate = {
@@ -69,7 +71,8 @@ export async function createSealedImage(
     const cover = await readImage(storage, source)
     const stego = await Steganography.embed(cover, serializeEnvelope({ v: 2, pub, enc, sig }))
 
-    const objectPath = `verified/verified_${Date.now()}_${cert.nomor_sertifikat.replace(/[^a-z0-9]/gi, "_")}.png`
+    // Unique per seal: serials are not unique and an upload must never overwrite another certificate's seal
+    const objectPath = `verified/${cert.id}/${Date.now()}_${randomUUID()}.png`
     const publicUrl = await storage.uploadVerified(objectPath, stego)
 
     return {

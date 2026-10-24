@@ -8,7 +8,7 @@ import * as ed from "@noble/ed25519"
 import { verifySeal } from "../src/lib/seal/verify"
 import { DEFAULT_KEYRING, type Keyring } from "../src/lib/seal/public-keys"
 import { randomBytes } from "node:crypto"
-import { publicKeyHexOf, signSeal, signingKeyFromSeed } from "../src/lib/seal/sign"
+import { assertSigningReady, publicKeyHexOf, signSeal, signingKeyFromSeed } from "../src/lib/seal/sign"
 
 const pub: SealPublic = { certId: "c1", serial: "SHM-001", verifiedAt: "2026-10-23T08:00:00.000Z", issuer: "Terrafy", kid: "test-1" }
 const enc = "00112233445566778899aabb:00112233445566778899aabbccddeeff:abcdef"
@@ -206,5 +206,29 @@ describe("signSeal (Node crypto)", () => {
         assert.throws(() => signSeal(pub, enc, keyring), /SEAL_SIGNING_KEY/)
         process.env.SEAL_SIGNING_KEY = "abc"
         assert.throws(() => signSeal(pub, enc, keyring), /SEAL_SIGNING_KEY/)
+    })
+
+    describe("assertSigningReady", () => {
+        it("does not throw for a good setup", () => {
+            process.env.SEAL_SIGNING_KEY = seed
+            assert.doesNotThrow(() => assertSigningReady(keyring))
+        })
+
+        it("throws for a missing or malformed seed", () => {
+            delete process.env.SEAL_SIGNING_KEY
+            assert.throws(() => assertSigningReady(keyring), /SEAL_SIGNING_KEY/)
+            process.env.SEAL_SIGNING_KEY = "abc"
+            assert.throws(() => assertSigningReady(keyring), /SEAL_SIGNING_KEY/)
+        })
+
+        it("throws for a seed that does not match the active public key", () => {
+            process.env.SEAL_SIGNING_KEY = randomBytes(32).toString("hex")
+            assert.throws(() => assertSigningReady(keyring), /tidak cocok/)
+        })
+
+        it("throws when the active kid is revoked", () => {
+            process.env.SEAL_SIGNING_KEY = seed
+            assert.throws(() => assertSigningReady({ ...keyring, revokedKids: ["test-1"] }), /dicabut/)
+        })
     })
 })

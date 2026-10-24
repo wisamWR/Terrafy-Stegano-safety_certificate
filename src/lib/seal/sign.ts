@@ -23,14 +23,28 @@ export function publicKeyHexOf(privateKey: KeyObject): string {
     return spki.subarray(spki.length - 32).toString("hex")
 }
 
-/** Signs a v2 envelope with SEAL_SIGNING_KEY after checking it is the keyring's active key. */
-export function signSeal(pub: SealPublic, enc: string, keyring: Keyring = DEFAULT_KEYRING): string {
-    if (pub.kid !== keyring.activeKid) throw new Error(`kid "${pub.kid}" bukan kunci aktif (${keyring.activeKid})`)
+/**
+ * Checks that SEAL_SIGNING_KEY is usable for the keyring's active key: not revoked, valid seed,
+ * and matching the published public key. Returns the key so callers do not parse it twice.
+ */
+function loadActiveSigningKey(keyring: Keyring): KeyObject {
     if (keyring.revokedKids.includes(keyring.activeKid)) throw new Error(`kid aktif "${keyring.activeKid}" telah dicabut; rotasi kunci dulu`)
     const key = signingKeyFromSeed(process.env.SEAL_SIGNING_KEY)
     const expected = Object.hasOwn(keyring.publicKeys, keyring.activeKid) ? keyring.publicKeys[keyring.activeKid] : undefined
     if (!expected || publicKeyHexOf(key) !== expected.toLowerCase()) {
         throw new Error(`SEAL_SIGNING_KEY tidak cocok dengan kunci publik "${keyring.activeKid}" di src/lib/seal/public-keys.ts`)
     }
+    return key
+}
+
+/** Throws unless a seal could be signed right now. Use to fail before any state changes. */
+export function assertSigningReady(keyring: Keyring = DEFAULT_KEYRING): void {
+    loadActiveSigningKey(keyring)
+}
+
+/** Signs a v2 envelope with SEAL_SIGNING_KEY after checking it is the keyring's active key. */
+export function signSeal(pub: SealPublic, enc: string, keyring: Keyring = DEFAULT_KEYRING): string {
+    if (pub.kid !== keyring.activeKid) throw new Error(`kid "${pub.kid}" bukan kunci aktif (${keyring.activeKid})`)
+    const key = loadActiveSigningKey(keyring)
     return toBase64Url(sign(null, buildSigningBytes(pub, enc), key))
 }

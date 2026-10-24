@@ -3,6 +3,7 @@
 // The signature covers SEAL_DOMAIN + canonicalJSON(pub) + enc, so the encrypted part is signed too.
 
 export const SEAL_DOMAIN = "TERRAFY-SEAL-v2"
+export const SEAL_ISSUER = "Terrafy"
 
 export type SealPublic = { certId: string; serial: string; verifiedAt: string; issuer: string; kid: string }
 export type SealEnvelope = { v: 2; pub: SealPublic; enc: string; sig: string }

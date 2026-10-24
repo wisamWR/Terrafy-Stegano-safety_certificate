@@ -214,19 +214,28 @@ if (!TEST_DB) {
             assert.equal(await prisma.notification.count({ where: { userId: alice.id, type: "CERTIFICATE_VERIFIED" } }), 1)
         })
 
-        it("fails to seal without SEAL_SIGNING_KEY, then succeeds on re-approval once it is set", async () => {
+        it("refuses to approve without SEAL_SIGNING_KEY and changes nothing; approves normally once it is set", async () => {
             const saved = process.env.SEAL_SIGNING_KEY
             const { certificate } = (await registration.createCertificate(alice, input(), storage)) as any
-            delete process.env.SEAL_SIGNING_KEY
-            const first = await approval.reviewCertificate(admin, certificate.id, "VERIFIED", undefined, storage, keyring)
-            process.env.SEAL_SIGNING_KEY = saved
+            let first
+            try {
+                delete process.env.SEAL_SIGNING_KEY
+                first = await approval.reviewCertificate(admin, certificate.id, "VERIFIED", undefined, storage, keyring)
+            } finally {
+                process.env.SEAL_SIGNING_KEY = saved
+            }
             assert.equal(first.success, false)
             assert.match((first as any).error, /SEAL_SIGNING_KEY/)
-            assert.equal((await prisma.certificate.findUniqueOrThrow({ where: { id: certificate.id } })).status, "VERIFIED")
+            assert.equal((await prisma.certificate.findUniqueOrThrow({ where: { id: certificate.id } })).status, "PENDING")
             assert.equal(await prisma.steganographyMetadata.count(), 0)
+            assert.equal(storage.buckets.get("certificates")!.size, 0)
+            assert.equal(storage.buckets.get("pending-uploads")!.size, 1)
+            assert.equal(await prisma.notification.count({ where: { type: "CERTIFICATE_VERIFIED" } }), 0)
 
             assert.ok((await approval.reviewCertificate(admin, certificate.id, "VERIFIED", undefined, storage, keyring)).success)
             assert.equal((await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: certificate.id } })).sealVersion, 2)
+            assert.equal(await prisma.adminAuditLog.count({ where: { action: "APPROVE_CERT" } }), 1)
+            assert.equal(await prisma.notification.count({ where: { userId: alice.id, type: "CERTIFICATE_VERIFIED" } }), 1)
         })
 
         it("rejects with a reason and does not seal", async () => {
