@@ -34,17 +34,18 @@ export async function reviewCertificate(
         return fail("Transfer masih menunggu konfirmasi penerima")
     }
 
-    // Fail before any state change: a half-approved certificate would lose its notification and audit entry
-    if (decision === "VERIFIED" && existing.image_url) {
+    const hasSeal = existing.steganographyMetadata.length > 0
+    const isTransfer = existing.status === "TRANSFER_PENDING"
+
+    // Fail before any state change: a half-approved certificate would lose its notification and audit entry.
+    // Only needed when a new seal will be issued (a transfer approval deletes the old seal first).
+    if (decision === "VERIFIED" && existing.image_url && (!hasSeal || isTransfer)) {
         try {
             assertSigningReady(keyring)
         } catch (error) {
             return fail("Gagal menerbitkan segel: " + (error as Error).message)
         }
     }
-
-    const hasSeal = existing.steganographyMetadata.length > 0
-    const isTransfer = existing.status === "TRANSFER_PENDING"
 
     if (existing.status === decision) {
         const needsReseal = decision === "VERIFIED" && !hasSeal && !!existing.image_url

@@ -281,6 +281,19 @@ if (!TEST_DB) {
             assert.equal(await prisma.history.count(), historyBefore)
         })
 
+        it("re-approving an already sealed VERIFIED certificate is a no-op even without SEAL_SIGNING_KEY", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const saved = process.env.SEAL_SIGNING_KEY
+            let res
+            try {
+                delete process.env.SEAL_SIGNING_KEY
+                res = await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage, keyring)
+            } finally {
+                process.env.SEAL_SIGNING_KEY = saved
+            }
+            assert.ok(res.success, JSON.stringify(res))
+        })
+
         it("refuses to seal from a location outside our storage", async () => {
             const { certificate } = (await registration.createCertificate(alice, input(), storage)) as any
             await prisma.certificate.update({ where: { id: certificate.id }, data: { image_url: "../../.env" } })
