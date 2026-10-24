@@ -93,10 +93,10 @@ if (!TEST_DB) {
         return prisma.certificate.findUniqueOrThrow({ where: { id: created.certificate.id } })
     }
 
-    /** Replaces a certificate's v2 seal with a legacy v1 one (as issued before this feature). */
-    async function downgradeToV1(certId: string): Promise<Buffer> {
+    /** A legacy v1 seal payload for a certificate, as issued before this feature. */
+    async function legacyPayloadOf(certId: string) {
         const cert = await prisma.certificate.findUniqueOrThrow({ where: { id: certId }, include: { owner: true } })
-        const v1 = {
+        return {
             certId,
             ownerId: cert.ownerId,
             ownerName: cert.owner.name,
@@ -106,6 +106,11 @@ if (!TEST_DB) {
             transactionType: "Initial Registration",
             history: [],
         }
+    }
+
+    /** Replaces a certificate's v2 seal with a legacy v1 one. */
+    async function downgradeToV1(certId: string): Promise<Buffer> {
+        const v1 = await legacyPayloadOf(certId)
         const image = await Steganography.embed(png(), payload.sealPayload(v1))
         const url = await storage.uploadVerified(`verified/legacy_${certId}.png`, image)
         await prisma.steganographyMetadata.update({
@@ -283,15 +288,19 @@ if (!TEST_DB) {
 
         it("re-approving an already sealed VERIFIED certificate is a no-op even without SEAL_SIGNING_KEY", async () => {
             const cert = await verifiedCertificateOf(alice)
+            const before = await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: cert.id } })
             const saved = process.env.SEAL_SIGNING_KEY
             let res
             try {
                 delete process.env.SEAL_SIGNING_KEY
                 res = await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage, keyring)
             } finally {
-                process.env.SEAL_SIGNING_KEY = saved
+                if (saved === undefined) delete process.env.SEAL_SIGNING_KEY
+                else process.env.SEAL_SIGNING_KEY = saved
             }
             assert.ok(res.success, JSON.stringify(res))
+            const after = await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: cert.id } })
+            assert.equal(after.signature, before.signature)
         })
 
         it("refuses to seal from a location outside our storage", async () => {
@@ -492,10 +501,21 @@ if (!TEST_DB) {
 
         it("rejects a v2 seal signed with an unknown key", async () => {
             const cert = await verifiedCertificateOf(alice)
-            const other = { activeKid: "test-1", publicKeys: { "test-1": "11".repeat(32) }, revokedKids: [] }
+            const other = { activeKid: "x", publicKeys: { x: "11".repeat(32) }, revokedKids: [] }
             const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, other)
             assert.equal(res.success, false)
             assert.match((res as any).error, /Tanda tangan digital tidak valid/)
+            assert.equal((res as any).code, "UNKNOWN_KID")
+        })
+
+        it("rejects a v2 seal whose signature does not match the key", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const sign = await import("../src/lib/seal/sign")
+            const otherKey = sign.publicKeyHexOf(sign.signingKeyFromSeed(randomBytes(32).toString("hex")))
+            const wrong = { ...keyring, publicKeys: { "test-1": otherKey } }
+            const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, wrong)
+            assert.equal(res.success, false)
+            assert.equal((res as any).code, "BAD_SIGNATURE")
         })
 
         it("rejects a v2 seal whose kid was revoked", async () => {
@@ -504,6 +524,7 @@ if (!TEST_DB) {
             const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, revoked)
             assert.equal(res.success, false)
             assert.match((res as any).error, /dicabut/)
+            assert.equal((res as any).code, "REVOKED_KID")
         })
 
         it("still verifies a legacy v1 seal and labels it", async () => {
@@ -521,6 +542,58 @@ if (!TEST_DB) {
             const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, keyring)
             assert.ok(res.success)
             assert.equal(res.status, "REJECTED")
+            assert.equal(res.isOwnerMatch, false)
+        })
+
+        it("gives a former owner no link to the current seal and leaks nothing about the new owner", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const oldImage = storage.verifiedImage(cert.image_url!)
+            assert.ok((await transfer.requestTransfer(alice, cert.id, "bob@test.id", "Jual Beli")).success)
+            assert.ok((await transfer.acceptTransfer(bob, cert.id)).success)
+            assert.ok((await approval.reviewCertificate(admin, cert.id, "VERIFIED", undefined, storage, keyring)).success)
+
+            const res = await verification.verifyCertificateImage(oldImage, storage, keyring)
+            assert.ok(res.success)
+            assert.equal(res.isOwnerMatch, false)
+            assert.equal(res.certificate.image_url, "/placeholder_secure.png")
+            assert.equal("transferToEmail" in res, false)
+            assert.ok(!JSON.stringify(res).includes("bob@test.id"))
+        })
+
+        it("treats a legacy v1 image as not current once a v2 seal exists for the same owner", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const v1Image = await Steganography.embed(png(), payload.sealPayload(await legacyPayloadOf(cert.id)))
+            const res = await verification.verifyCertificateImage(v1Image, storage, keyring)
+            assert.ok(res.success)
+            assert.equal(res.isOwnerMatch, false)
+        })
+
+        it("reports a valid signature over a deleted certificate as a mismatch without details", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const image = storage.verifiedImage(cert.image_url!)
+            await prisma.certificate.delete({ where: { id: cert.id } })
+            const res = await verification.verifyCertificateImage(image, storage, keyring)
+            assert.equal(res.success, false)
+            assert.equal((res as any).code, "SEAL_DATA_MISMATCH")
+            assert.equal("details" in res, false)
+        })
+
+        it("keeps the current seal current while a transfer awaits admin approval", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            assert.ok((await transfer.requestTransfer(alice, cert.id, "bob@test.id", "Jual Beli")).success)
+            assert.ok((await transfer.acceptTransfer(bob, cert.id)).success)
+            const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, keyring)
+            assert.ok(res.success)
+            assert.equal(res.isOwnerMatch, true)
+            assert.equal(res.status, "TRANSFER_PENDING")
+        })
+
+        it("fails closed when a v2 seal has no metadata row", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const image = storage.verifiedImage(cert.image_url!)
+            await prisma.steganographyMetadata.deleteMany({ where: { certificateId: cert.id } })
+            const res = await verification.verifyCertificateImage(image, storage, keyring)
+            assert.ok(res.success)
             assert.equal(res.isOwnerMatch, false)
         })
 

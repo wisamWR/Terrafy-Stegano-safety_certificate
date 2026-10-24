@@ -37,9 +37,11 @@ export async function reviewCertificate(
     const hasSeal = existing.steganographyMetadata.length > 0
     const isTransfer = existing.status === "TRANSFER_PENDING"
 
-    // Fail before any state change: a half-approved certificate would lose its notification and audit entry.
-    // Only needed when a new seal will be issued (a transfer approval deletes the old seal first).
-    if (decision === "VERIFIED" && existing.image_url && (!hasSeal || isTransfer)) {
+    // A new seal is issued unless the certificate already has one (a transfer approval deletes the old seal first)
+    const willIssueSeal = decision === "VERIFIED" && !!existing.image_url && (!hasSeal || isTransfer)
+
+    // Fail before any state change: a half-approved certificate would lose its notification and audit entry
+    if (willIssueSeal) {
         try {
             assertSigningReady(keyring)
         } catch (error) {
@@ -48,8 +50,8 @@ export async function reviewCertificate(
     }
 
     if (existing.status === decision) {
-        const needsReseal = decision === "VERIFIED" && !hasSeal && !!existing.image_url
-        if (!needsReseal) return currentDetail(admin, certId, storage)
+        // Same status: only a missing seal (earlier embed failure) still needs work
+        if (!willIssueSeal) return currentDetail(admin, certId, storage)
     } else {
         const outcome = await applyDecision(admin, existing, decision, note, isTransfer)
         if ("error" in outcome) return outcome

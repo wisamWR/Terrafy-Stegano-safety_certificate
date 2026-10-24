@@ -34,7 +34,7 @@ export async function verifyCertificateImage(image: Buffer, storage: Certificate
     try {
         revealed = await Steganography.reveal(image)
     } catch {
-        return fail("Tidak ditemukan data tersembunyi. Sertifikat mungkin bukan asli atau gambar telah dimodifikasi.")
+        return fail("Tidak ditemukan data tersembunyi. Sertifikat mungkin bukan asli atau gambar telah dimodifikasi.", { code: "NO_SEAL" })
     }
 
     const parsed = parseEnvelope(revealed)
@@ -44,16 +44,22 @@ export async function verifyCertificateImage(image: Buffer, storage: Certificate
 
     if (parsed.kind === "v2") {
         const verdict = await verifySeal(parsed.envelope, keyring)
-        if (!verdict.valid) return fail(SIGNATURE_ERRORS[verdict.reason], { code: verdict.reason.toUpperCase() })
+        if (!verdict.valid) {
+            // Server misconfiguration (not a forged seal): make it visible to operators
+            if (verdict.reason === "verifier_unavailable") console.error("[VERIFY] Signature verifier unavailable (keyring or WebCrypto problem)")
+            return fail(SIGNATURE_ERRORS[verdict.reason], { code: verdict.reason.toUpperCase() })
+        }
 
         const secret = openPayload(parsed.envelope.enc)
         if (!secret) {
+            console.error("[VERIFY] Valid signature but the encrypted part cannot be opened (encryption key mismatch?)", { certId: parsed.envelope.pub.certId })
             return fail("Tanda tangan asli, tetapi data terenkripsi tidak dapat dibuka (kunci enkripsi server berbeda).", { code: "FAIL_DECRYPT" })
         }
         const { pub, sig } = parsed.envelope
         hidden = { certId: pub.certId, serial: pub.serial, ownerId: secret.ownerId, ownerName: secret.ownerName }
         seal = { version: 2, signed: true, kid: pub.kid, issuedAt: pub.verifiedAt }
-        isLatestSeal = (current) => !current || current.signature === sig
+        // Fail closed: a v2 seal always writes its metadata row; a missing row means a transfer removed it and re-sealing failed
+        isLatestSeal = (current) => current?.signature === sig
     } else if (parsed.kind === "v1") {
         const legacy = openPayload(parsed.sealed)
         if (!legacy) return fail(UNREADABLE, { code: "FAIL_DECRYPT_OR_PARSE" })
@@ -76,14 +82,12 @@ export async function verifyCertificateImage(image: Buffer, storage: Certificate
 
     if (!certificate || certificate.nomor_sertifikat !== hidden.serial) {
         if (seal.signed) {
-            // A genuine signature over data the database does not know: worth investigating
-            console.warn("[VERIFY] Valid signature but no matching certificate", { certId: hidden.certId, serial: hidden.serial })
-            return fail("Tanda tangan asli, tetapi data sertifikat tidak cocok dengan database.")
+            // Expected when the certificate or its account was deleted after sealing
+            console.info("[VERIFY] Valid signature but no matching certificate", { certId: hidden.certId, serial: hidden.serial })
+            return fail("Tanda tangan asli, tetapi data sertifikat tidak cocok dengan database.", { code: "SEAL_DATA_MISMATCH" })
         }
-        if (!certificate) return fail("Sertifikat tidak ditemukan di database (ID tidak valid).")
-        return fail("Data tidak cocok! Nomor sertifikat dalam gambar berbeda dengan database.", {
-            details: { imageSerial: hidden.serial, dbSerial: certificate.nomor_sertifikat },
-        })
+        if (!certificate) return fail("Sertifikat tidak ditemukan di database (ID tidak valid).", { code: "CERT_NOT_FOUND" })
+        return fail("Data tidak cocok! Nomor sertifikat dalam gambar berbeda dengan database.", { code: "SERIAL_MISMATCH" })
     }
 
     const isCurrent =
@@ -94,11 +98,13 @@ export async function verifyCertificateImage(image: Buffer, storage: Certificate
     const ownerName = isCurrent ? (certificate.owner.name || certificate.owner.email) : "Terproteksi (Pemilik Telah Berubah)"
     const ownerEmail = isCurrent ? certificate.owner.email : "Privasi Dilindungi"
 
-    let imageUrl = certificate.image_url
-    if (imageUrl?.startsWith(PENDING_PREFIX)) {
-        imageUrl = isCurrent
-            ? (await storage.signPendingUrl(imageUrl.slice(PENDING_PREFIX.length), 3600)) ?? imageUrl
-            : "/placeholder_secure.png"
+    // A stale seal must never lead to the current image (it would reveal the current owner's details)
+    let imageUrl: string | null = "/placeholder_secure.png"
+    if (isCurrent) {
+        imageUrl = certificate.image_url
+        if (imageUrl?.startsWith(PENDING_PREFIX)) {
+            imageUrl = (await storage.signPendingUrl(imageUrl.slice(PENDING_PREFIX.length), 3600)) ?? imageUrl
+        }
     }
 
     const history = (isCurrent ? certificate.history : []).map((h) => ({
@@ -116,7 +122,6 @@ export async function verifyCertificateImage(image: Buffer, storage: Certificate
         ownerName,
         ownerEmail,
         status: certificate.status,
-        transferToEmail: certificate.transferToEmail,
         seal,
         certificate: {
             id: certificate.id,
