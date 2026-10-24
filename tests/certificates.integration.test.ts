@@ -93,6 +93,29 @@ if (!TEST_DB) {
         return prisma.certificate.findUniqueOrThrow({ where: { id: created.certificate.id } })
     }
 
+    /** Replaces a certificate's v2 seal with a legacy v1 one (as issued before this feature). */
+    async function downgradeToV1(certId: string): Promise<Buffer> {
+        const cert = await prisma.certificate.findUniqueOrThrow({ where: { id: certId }, include: { owner: true } })
+        const v1 = {
+            certId,
+            ownerId: cert.ownerId,
+            ownerName: cert.owner.name,
+            verifiedAt: cert.verifiedAt!.toISOString(),
+            validator: "Admin",
+            serial: cert.nomor_sertifikat,
+            transactionType: "Initial Registration",
+            history: [],
+        }
+        const image = await Steganography.embed(png(), payload.sealPayload(v1))
+        const url = await storage.uploadVerified(`verified/legacy_${certId}.png`, image)
+        await prisma.steganographyMetadata.update({
+            where: { certificateId: certId },
+            data: { sealVersion: 1, signingKeyId: null, signature: null, hashValue: payload.hashPayload(v1), stegoImage: url },
+        })
+        await prisma.certificate.update({ where: { id: certId }, data: { image_url: url, stegoImageUrl: url } })
+        return image
+    }
+
     before(async () => {
         prisma = (await import("../src/lib/prisma")).default
         registration = await import("../src/lib/certificates/registration")
@@ -430,12 +453,62 @@ if (!TEST_DB) {
 
         it("detects a single flipped bit in the hidden ciphertext", async () => {
             const cert = await verifiedCertificateOf(alice)
-            const img = PNG.sync.read(storage.verifiedImage(cert.image_url!))
-            // Channel 1000 lies inside the ciphertext (header is 88 channels, iv+tag ~ 470)
-            const idx = Math.floor(1000 / 3) * 4 + (1000 % 3)
-            img.data[idx] ^= 1
+            const stored = storage.verifiedImage(cert.image_url!)
+            const text = await Steganography.reveal(stored)
+            // Pick a decimal digit inside `enc`: flipping bit 0 keeps it a digit (0<->1, 2<->3...), so the
+            // envelope still parses and only the signature check can catch the change.
+            const encStart = text.indexOf('"enc":"') + 7
+            let index = encStart + 60
+            while (!/[0-9]/.test(text[index])) index++
+            // Embedded stream: 7-byte magic + 4-byte length, then the ASCII envelope (1 byte = 8 channels)
+            const byte = 11 + index
+            const ch = byte * 8
+            const img = PNG.sync.read(stored)
+            img.data[Math.floor(ch / 3) * 4 + (ch % 3)] ^= 1
             const res = await verification.verifyCertificateImage(PNG.sync.write(img), storage, keyring)
             assert.equal(res.success, false)
+            assert.match((res as any).error, /Tanda tangan digital tidak valid/)
+        })
+
+        it("reports seal info for a v2 seal", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, keyring)
+            assert.ok(res.success)
+            assert.deepEqual(res.seal, { version: 2, signed: true, kid: "test-1", issuedAt: cert.verifiedAt!.toISOString() })
+        })
+
+        it("rejects a v2 seal signed with an unknown key", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const other = { activeKid: "test-1", publicKeys: { "test-1": "11".repeat(32) }, revokedKids: [] }
+            const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, other)
+            assert.equal(res.success, false)
+            assert.match((res as any).error, /Tanda tangan digital tidak valid/)
+        })
+
+        it("rejects a v2 seal whose kid was revoked", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const revoked = { ...keyring, revokedKids: ["test-1"] }
+            const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, revoked)
+            assert.equal(res.success, false)
+            assert.match((res as any).error, /dicabut/)
+        })
+
+        it("still verifies a legacy v1 seal and labels it", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const legacyImage = await downgradeToV1(cert.id)
+            const res = await verification.verifyCertificateImage(legacyImage, storage, keyring)
+            assert.ok(res.success)
+            assert.equal(res.isOwnerMatch, true)
+            assert.deepEqual(res.seal, { version: 1, signed: false })
+        })
+
+        it("marks a genuine seal of a revoked certificate as not current", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            assert.ok((await approval.reviewCertificate(admin, cert.id, "REJECTED", "Dicabut", storage, keyring)).success)
+            const res = await verification.verifyCertificateImage(storage.verifiedImage(cert.image_url!), storage, keyring)
+            assert.ok(res.success)
+            assert.equal(res.status, "REJECTED")
+            assert.equal(res.isOwnerMatch, false)
         })
 
         it("rejects an image with no hidden data", async () => {
