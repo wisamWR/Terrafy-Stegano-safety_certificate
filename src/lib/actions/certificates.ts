@@ -12,6 +12,7 @@ import * as registration from "@/lib/certificates/registration"
 import * as transfer from "@/lib/certificates/transfer"
 import * as notifications from "@/lib/certificates/notifications"
 import { reviewCertificate } from "@/lib/certificates/approval"
+import * as reissue from "@/lib/certificates/reissue"
 import { verifyCertificateImage as verifyImage } from "@/lib/certificates/verification"
 
 async function readFile(formData: FormData, field = "file"): Promise<UploadedFile | null> {
@@ -129,6 +130,13 @@ export async function updateCertificateStatus(id: string, status: "VERIFIED" | "
     revalidatePath("/admin/persetujuan")
     revalidatePath("/admin/dashboard")
     revalidatePath(`/sertifikat/${id}`)
+    return result
+}
+
+export async function reissueSeal(certId: string) {
+    const result = await asAdmin("Gagal menerbitkan ulang segel", (admin) => reissue.reissueSeal(admin, certId, supabaseStorage()))
+    revalidatePath(`/admin/persetujuan/${certId}`)
+    revalidatePath(`/sertifikat/${certId}`)
     return result
 }
 

@@ -29,6 +29,7 @@ if (!TEST_DB) {
     let queries: typeof import("../src/lib/certificates/queries")
     let notifications: typeof import("../src/lib/certificates/notifications")
     let verification: typeof import("../src/lib/certificates/verification")
+    let reissue: typeof import("../src/lib/certificates/reissue")
     let payload: typeof import("../src/lib/certificates/payload")
     let Steganography: typeof import("../src/lib/steganography").Steganography
     let envelope: typeof import("../src/lib/seal/envelope")
@@ -129,6 +130,7 @@ if (!TEST_DB) {
         queries = await import("../src/lib/certificates/queries")
         notifications = await import("../src/lib/certificates/notifications")
         verification = await import("../src/lib/certificates/verification")
+        reissue = await import("../src/lib/certificates/reissue")
         payload = await import("../src/lib/certificates/payload")
         Steganography = (await import("../src/lib/steganography")).Steganography
         envelope = await import("../src/lib/seal/envelope")
@@ -453,6 +455,7 @@ if (!TEST_DB) {
             assert.ok(res.success)
             assert.equal(res.isOwnerMatch, true)
             assert.equal(res.certificate.nomor, "SHM-001")
+            assert.equal(res.certificate.image_url, cert.image_url)
         })
 
         it("rejects an image with a forged plain-JSON payload", async () => {
@@ -600,6 +603,54 @@ if (!TEST_DB) {
         it("rejects an image with no hidden data", async () => {
             const res = await verification.verifyCertificateImage(png(), storage, keyring)
             assert.equal(res.success, false)
+        })
+    })
+
+    describe("seal reissue", () => {
+        it("upgrades a v1 seal to v2 and notifies the owner", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            await downgradeToV1(cert.id)
+
+            const res = await reissue.reissueSeal(admin, cert.id, storage, keyring)
+            assert.ok(res.success, JSON.stringify(res))
+
+            const meta = await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: cert.id } })
+            assert.equal(meta.sealVersion, 2)
+            const after = await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })
+            const verified = await verification.verifyCertificateImage(storage.verifiedImage(after.image_url!), storage, keyring)
+            assert.ok(verified.success)
+            assert.equal(verified.isOwnerMatch, true)
+            assert.equal(verified.seal.version, 2)
+            assert.equal(await prisma.notification.count({ where: { userId: alice.id, title: "Segel Diperbarui" } }), 1)
+            assert.equal(await prisma.adminAuditLog.count({ where: { action: "REISSUE_SEAL" } }), 1)
+        })
+
+        it("keeps the v1 seal intact when reissue fails", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const v1Image = await downgradeToV1(cert.id)
+            const v1Url = (await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })).image_url
+            const saved = process.env.SEAL_SIGNING_KEY
+            delete process.env.SEAL_SIGNING_KEY
+            let res
+            try {
+                res = await reissue.reissueSeal(admin, cert.id, storage, keyring)
+            } finally {
+                if (saved === undefined) delete process.env.SEAL_SIGNING_KEY
+                else process.env.SEAL_SIGNING_KEY = saved
+            }
+            assert.equal(res.success, false)
+            assert.equal((await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: cert.id } })).sealVersion, 1)
+            assert.equal((await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })).image_url, v1Url)
+            const stillValid = await verification.verifyCertificateImage(v1Image, storage, keyring)
+            assert.ok(stillValid.success)
+            assert.equal(stillValid.isOwnerMatch, true)
+        })
+
+        it("refuses seals that are already v2 and certificates that are not VERIFIED", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            assert.equal((await reissue.reissueSeal(admin, cert.id, storage, keyring)).success, false)
+            const { certificate } = (await registration.createCertificate(bob, input({ nomorSertifikat: "SHM-P" }), storage)) as any
+            assert.equal((await reissue.reissueSeal(admin, certificate.id, storage, keyring)).success, false)
         })
     })
 
