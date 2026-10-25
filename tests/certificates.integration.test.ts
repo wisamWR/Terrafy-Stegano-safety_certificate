@@ -609,7 +609,7 @@ if (!TEST_DB) {
     describe("seal reissue", () => {
         it("upgrades a v1 seal to v2 and notifies the owner", async () => {
             const cert = await verifiedCertificateOf(alice)
-            await downgradeToV1(cert.id)
+            const v1Image = await downgradeToV1(cert.id)
 
             const res = await reissue.reissueSeal(admin, cert.id, storage, keyring)
             assert.ok(res.success, JSON.stringify(res))
@@ -623,12 +623,18 @@ if (!TEST_DB) {
             assert.equal(verified.seal.version, 2)
             assert.equal(await prisma.notification.count({ where: { userId: alice.id, title: "Segel Diperbarui" } }), 1)
             assert.equal(await prisma.adminAuditLog.count({ where: { action: "REISSUE_SEAL" } }), 1)
+
+            // The old v1 image no longer counts as the current seal
+            const old = await verification.verifyCertificateImage(v1Image, storage, keyring)
+            assert.ok(old.success)
+            assert.equal(old.isOwnerMatch, false)
         })
 
         it("keeps the v1 seal intact when reissue fails", async () => {
             const cert = await verifiedCertificateOf(alice)
             const v1Image = await downgradeToV1(cert.id)
             const v1Url = (await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })).image_url
+            const objectsBefore = storage.buckets.get("certificates")!.size
             const saved = process.env.SEAL_SIGNING_KEY
             delete process.env.SEAL_SIGNING_KEY
             let res
@@ -639,6 +645,7 @@ if (!TEST_DB) {
                 else process.env.SEAL_SIGNING_KEY = saved
             }
             assert.equal(res.success, false)
+            assert.equal(storage.buckets.get("certificates")!.size, objectsBefore)
             assert.equal((await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: cert.id } })).sealVersion, 1)
             assert.equal((await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })).image_url, v1Url)
             const stillValid = await verification.verifyCertificateImage(v1Image, storage, keyring)
@@ -648,9 +655,40 @@ if (!TEST_DB) {
 
         it("refuses seals that are already v2 and certificates that are not VERIFIED", async () => {
             const cert = await verifiedCertificateOf(alice)
-            assert.equal((await reissue.reissueSeal(admin, cert.id, storage, keyring)).success, false)
+            const already = await reissue.reissueSeal(admin, cert.id, storage, keyring)
+            assert.equal(already.success, false)
+            assert.match(already.error!, /sudah versi terbaru/)
             const { certificate } = (await registration.createCertificate(bob, input({ nomorSertifikat: "SHM-P" }), storage)) as any
-            assert.equal((await reissue.reissueSeal(admin, certificate.id, storage, keyring)).success, false)
+            const pending = await reissue.reissueSeal(admin, certificate.id, storage, keyring)
+            assert.equal(pending.success, false)
+            assert.match(pending.error!, /Hanya sertifikat terverifikasi/)
+        })
+
+        it("does not reseal a certificate revoked during reissue", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            await downgradeToV1(cert.id)
+            const v1Url = (await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })).image_url
+
+            // Revokes the certificate in the middle of the upload; the nested call uses the unwrapped storage
+            const racing: CertificateStorage = {
+                uploadPending: (n, d) => storage.uploadPending(n, d),
+                removePending: (n) => storage.removePending(n),
+                signPendingUrl: (n) => storage.signPendingUrl(n),
+                download: (b, p) => storage.download(b, p),
+                uploadVerified: async (path, data) => {
+                    const revoked = await approval.reviewCertificate(admin, cert.id, "REJECTED", "Dicabut", storage, keyring)
+                    assert.ok(revoked.success, JSON.stringify(revoked))
+                    return storage.uploadVerified(path, data)
+                },
+            }
+
+            const res = await reissue.reissueSeal(admin, cert.id, racing, keyring)
+            assert.equal(res.success, false)
+            assert.equal(res.code, "STALE")
+            assert.equal((await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: cert.id } })).sealVersion, 1)
+            assert.equal((await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })).image_url, v1Url)
+            assert.equal(await prisma.notification.count({ where: { title: "Segel Diperbarui" } }), 0)
+            assert.equal(await prisma.adminAuditLog.count({ where: { action: "REISSUE_SEAL" } }), 0)
         })
     })
 
