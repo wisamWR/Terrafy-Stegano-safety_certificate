@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowLeft, CheckCircle, XCircle, FileText, User, Calendar, History, ZoomIn, X, Upload, ShieldCheck, ShieldAlert, MapPin, Loader2, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -54,6 +54,9 @@ function headerState(result: Certificate): { tone: HeaderTone; title: string; su
     if (result.status === "REJECTED") {
         return { tone: "red", title: "Sertifikat Tidak Berlaku", subtitle: "⛔ Segel asli, tetapi sertifikat ini telah dicabut/ditolak menurut data terkini.", badge: "Revoked" }
     }
+    if (!result.isOwnerMatch) {
+        return { tone: "amber", title: "Segel Tidak Terbaru", subtitle: "⚠️ Gambar ini bukan segel terbaru (pindah tangan atau segel telah diperbarui).", badge: "Outdated" }
+    }
     if (result.status === "TRANSFER_PENDING" || result.status === "AWAITING_RECIPIENT") {
         return {
             tone: "blue",
@@ -62,12 +65,26 @@ function headerState(result: Certificate): { tone: HeaderTone; title: string; su
             badge: result.status === "TRANSFER_PENDING" ? "Transfer Pending" : "Awaiting Recipient",
         }
     }
-    if (!result.isOwnerMatch) {
-        return { tone: "amber", title: "Segel Tidak Terbaru", subtitle: "⚠️ Gambar ini bukan segel terbaru (pindah tangan atau segel telah diperbarui).", badge: "Outdated" }
-    }
     return { tone: "emerald", title: "Sertifikat Valid & Asli", subtitle: "✅ Selamat! Integritas data digital terverifikasi sepenuhnya.", badge: "Verified" }
 }
 
+
+function notCurrentCopy(status: string | undefined): { badge: string; heading: string; text: string; advice: string | null } {
+    if (status === "REJECTED") {
+        return {
+            badge: "REVOKED",
+            heading: "Sertifikat Telah Dicabut",
+            text: "Segel pada gambar ini asli, tetapi sertifikat sudah tidak berlaku menurut data terkini.",
+            advice: null,
+        }
+    }
+    return {
+        badge: "OUTDATED",
+        heading: "Segel Tidak Terbaru",
+        text: "Gambar ini bukan segel terbaru sertifikat ini (kepemilikan berpindah atau segel telah diperbarui). Data pemilik terkini dilindungi.",
+        advice: "Saran: Mintalah salinan sertifikat terbaru dari pemegang hak saat ini.",
+    }
+}
 
 export default function VerificationPage() {
     const [file, setFile] = useState<File | null>(null)
@@ -75,13 +92,30 @@ export default function VerificationPage() {
     const [errorMessage, setErrorMessage] = useState<string>("");
     const [imageZoomOpen, setImageZoomOpen] = useState(false);
     const [result, setResult] = useState<Certificate | null>(null);
+    const copy = notCurrentCopy(result?.status);
 
-    // Create object URL for the uploaded file to display it
-    const fileUrl = file ? URL.createObjectURL(file) : null;
+    // Object URL for previewing the uploaded file; created in the change handler, revoked on replace/unmount
+    const [fileUrl, setFileUrl] = useState<string | null>(null);
+    const fileUrlRef = useRef<string | null>(null);
+    // Incremented on every verify/file change so a stale online response can be ignored
+    const requestId = useRef(0);
+
+    useEffect(() => {
+        return () => {
+            if (fileUrlRef.current) URL.revokeObjectURL(fileUrlRef.current);
+        };
+    }, []);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            setFile(e.target.files[0])
+            const selected = e.target.files[0]
+            requestId.current += 1
+            if (fileUrlRef.current) URL.revokeObjectURL(fileUrlRef.current)
+            const url = URL.createObjectURL(selected)
+            fileUrlRef.current = url
+            setFileUrl(url)
+            setFile(selected)
+            setResult(null)
             setStatus("idle")
             setErrorMessage("")
         }
@@ -89,6 +123,7 @@ export default function VerificationPage() {
 
     const handleVerify = async () => {
         if (!file) return
+        const myRequest = ++requestId.current
         setStatus("loading")
         setResult(null);
         setErrorMessage("");
@@ -98,6 +133,7 @@ export default function VerificationPage() {
             formData.append("file", file);
 
             const response = await verifyCertificateImage(formData);
+            if (myRequest !== requestId.current) return;
 
             if (response.success && response.certificate) {
                 setResult({
@@ -112,6 +148,7 @@ export default function VerificationPage() {
                 setErrorMessage(response.error || "Gagal memverifikasi sertifikat.");
             }
         } catch (error) {
+            if (myRequest !== requestId.current) return;
             console.error("Verification error:", error);
             setStatus("error");
             setErrorMessage("Terjadi kesalahan sistem.");
@@ -299,7 +336,7 @@ export default function VerificationPage() {
                                             {!result.isOwnerMatch && (
                                                 <div className="flex items-center gap-2 bg-red-100 text-red-700 px-3 py-1 rounded-full border border-red-200 text-xs font-bold animate-pulse shadow-sm">
                                                     <AlertCircle className="h-3.5 w-3.5" />
-                                                    OUTDATED DATA
+                                                    {copy.badge}
                                                 </div>
                                             )}
                                         </div>
@@ -312,14 +349,15 @@ export default function VerificationPage() {
                                                         <ShieldAlert className="h-5 w-5 text-white" />
                                                     </div>
                                                     <div>
-                                                        <p className="font-bold text-lg leading-tight uppercase tracking-tight">Ketidaksesuaian Kepemilikan Terdeteksi</p>
+                                                        <p className="font-bold text-lg leading-tight uppercase tracking-tight">{copy.heading}</p>
                                                         <p className="text-sm mt-2 font-medium leading-relaxed opacity-90">
-                                                            Data yang tertanam dalam gambar ini mencatat <b className="text-amber-900 h-px bg-amber-200">{result.imageOwnerName}</b> sebagai pemilik.
-                                                            Namun, sesuai <b className="text-blue-900">Database Real-time</b>, hak milik sah saat ini dipegang oleh <b className="text-emerald-900">{result.ownerName}</b>.
+                                                            {copy.text}
                                                         </p>
-                                                        <div className="mt-4 p-3 bg-white/40 rounded-lg text-xs font-semibold italic border border-amber-300/50">
-                                                            Saran: Mintalah salinan sertifikat terbaru dari pemegang hak saat ini.
-                                                        </div>
+                                                        {copy.advice && (
+                                                            <div className="mt-4 p-3 bg-white/40 rounded-lg text-xs font-semibold italic border border-amber-300/50">
+                                                                {copy.advice}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>

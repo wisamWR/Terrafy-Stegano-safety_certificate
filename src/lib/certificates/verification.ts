@@ -95,7 +95,7 @@ export async function verifyCertificateImage(image: Buffer, storage: Certificate
         isLatestSeal(certificate.steganographyMetadata[0]) &&
         certificate.status !== "REJECTED"
 
-    const ownerName = isCurrent ? (certificate.owner.name || certificate.owner.email) : "Terproteksi (Pemilik Telah Berubah)"
+    const ownerName = isCurrent ? (certificate.owner.name || certificate.owner.email) : "Terproteksi (segel tidak terbaru)"
     const ownerEmail = isCurrent ? certificate.owner.email : "Privasi Dilindungi"
 
     // A stale seal must never lead to the current image (it would reveal the current owner's details)
