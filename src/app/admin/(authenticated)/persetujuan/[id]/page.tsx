@@ -198,21 +198,28 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
     const [imageZoomOpen, setImageZoomOpen] = useState(false);
     const [isReissuing, setIsReissuing] = useState(false);
 
+    const refreshCertificate = async () => {
+        const refreshed = await getCertificateById(id);
+        if (refreshed.success && refreshed.certificate) setCertificate(refreshed.certificate);
+    };
+
     const handleReissue = async () => {
         setIsReissuing(true);
-        const result = await reissueSeal(id);
-        if (result.success) {
-            const refreshed = await getCertificateById(id);
-            if (refreshed.success && refreshed.certificate) setCertificate(refreshed.certificate);
-        } else {
-            alert(result.error);
-            if (result.code === "STALE") {
-                // Certificate changed meanwhile: refresh so the panel reflects reality.
-                const refreshed = await getCertificateById(id);
-                if (refreshed.success && refreshed.certificate) setCertificate(refreshed.certificate);
+        try {
+            const result = await reissueSeal(id);
+            if (result.success) {
+                await refreshCertificate();
+                alert("Segel berhasil diterbitkan ulang (v2). Pemilik telah diberi notifikasi.");
+            } else {
+                alert(result.error);
+                if (result.code === "STALE") {
+                    // Certificate changed meanwhile: refresh so the panel reflects reality.
+                    await refreshCertificate();
+                }
             }
+        } finally {
+            setIsReissuing(false);
         }
-        setIsReissuing(false);
     };
 
     const handleAction = async (action: "approve" | "reject", reason?: string) => {
