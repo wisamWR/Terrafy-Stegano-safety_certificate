@@ -32,3 +32,21 @@ export function recordLoginFailure(key: string) {
 export function clearLoginFailures(key: string) {
     attempts.delete(key)
 }
+
+// Generic fixed-window limiter for public endpoints. Same per-instance caveat as above.
+const windows = new Map<string, Entry>()
+
+/** Returns true if this request is allowed, counting it against `key`. */
+export function allowRequest(key: string, limit: number, windowMs: number, now = Date.now()): boolean {
+    if (windows.size > 10_000) {
+        for (const [k, e] of windows) if (e.resetAt <= now) windows.delete(k)
+    }
+    const entry = windows.get(key)
+    if (!entry || entry.resetAt <= now) {
+        windows.set(key, { count: 1, resetAt: now + windowMs })
+        return true
+    }
+    if (entry.count >= limit) return false
+    entry.count++
+    return true
+}

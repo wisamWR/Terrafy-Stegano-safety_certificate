@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { randomBytes } from "node:crypto"
 import { signSession, verifySession } from "../src/lib/session"
 import { getEncryptionKey, getLegacyDecryptionKeys } from "../src/lib/crypto-key"
-import { clearLoginFailures, loginRetryAfter, recordLoginFailure } from "../src/lib/rate-limit"
+import { allowRequest, clearLoginFailures, loginRetryAfter, recordLoginFailure } from "../src/lib/rate-limit"
 
 const user = { id: "u1", name: "A", email: "a@x.id", role: "USER" as const }
 const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url")
@@ -69,5 +69,33 @@ describe("login rate limit", () => {
         assert.ok(loginRetryAfter(key) > 0)
         clearLoginFailures(key)
         assert.equal(loginRetryAfter(key), 0)
+    })
+})
+
+describe("request rate limit", () => {
+    it("allows `limit` requests per window, then blocks until the window resets", () => {
+        const key = `verify-${Math.random()}`
+        const t0 = 1_000_000
+        for (let i = 0; i < 20; i++) assert.equal(allowRequest(key, 20, 60_000, t0 + i), true)
+        assert.equal(allowRequest(key, 20, 60_000, t0 + 100), false)
+        assert.equal(allowRequest(key, 20, 60_000, t0 + 60_001), true)
+    })
+
+    it("tracks keys independently", () => {
+        const t0 = 2_000_000
+        assert.equal(allowRequest("a-key", 1, 60_000, t0), true)
+        assert.equal(allowRequest("a-key", 1, 60_000, t0), false)
+        assert.equal(allowRequest("b-key", 1, 60_000, t0), true)
+    })
+
+    it("still allows new keys after a mass of expired entries (prune path)", () => {
+        const t0 = 3_000_000
+        const tag = Math.random()
+        for (let i = 0; i < 10_050; i++) allowRequest(`flood-${tag}-${i}`, 1, 1_000, t0)
+        const later = t0 + 5_000
+        assert.equal(allowRequest(`fresh-${tag}`, 1, 1_000, later), true)
+        assert.equal(allowRequest(`fresh-${tag}`, 1, 1_000, later), false)
+        // an expired flood key starts a fresh window
+        assert.equal(allowRequest(`flood-${tag}-0`, 1, 1_000, later), true)
     })
 })

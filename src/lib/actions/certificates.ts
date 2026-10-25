@@ -4,6 +4,8 @@
 // revalidate pages. Business rules live in the service modules so they can be tested directly.
 
 import { revalidatePath } from "next/cache"
+import { headers } from "next/headers"
+import { allowRequest } from "@/lib/rate-limit"
 import { type AuthUser, getAdminUser, getAuthUser } from "@/lib/auth-guard"
 import { type ActionResult, type CertificateInput, type UploadedFile, MAX_CERTIFICATE_BYTES, fail } from "@/lib/certificates/common"
 import { supabaseStorage } from "@/lib/certificates/storage"
@@ -152,10 +154,14 @@ export async function markAllNotificationsAsRead() {
     return asUser("Gagal menandai semua notifikasi", (user) => notifications.markAllNotificationsRead(user))
 }
 
-/** Public: anyone may check an image, no login required. */
+/** Public: anyone may check an image, no login required. Rate limited per IP (20/min). */
 export async function verifyCertificateImage(formData: FormData) {
-    const file = await readFile(formData)
+    const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
+    // Check before reading the upload so a blocked caller's file is never buffered.
+    const allowed = allowRequest(`verify|${ip}`, 20, 60_000)
+    const file = allowed ? await readFile(formData) : null
     return respond("Terjadi kesalahan sistem saat verifikasi", async () => {
+        if (!allowed) return fail("Terlalu banyak permintaan verifikasi. Coba lagi dalam 1 menit.", { code: "RATE_LIMITED" })
         if (!file) return fail("File tidak valid")
         if (file.buffer.length > MAX_CERTIFICATE_BYTES) return fail("Ukuran file terlalu besar (maks 10 MB)")
         return verifyImage(file.buffer, supabaseStorage())
