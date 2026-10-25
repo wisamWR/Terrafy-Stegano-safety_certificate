@@ -102,6 +102,7 @@ erDiagram
    - `NEXT_PUBLIC_SUPABASE_URL` & `ANON_KEY` (dari setting API Supabase)
    - `STEGANOGRAPHY_KEY` (WAJIB. 32-byte hex untuk AES-256-GCM: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
    - `SESSION_SECRET` (WAJIB. Minimal 32 karakter acak untuk menandatangani cookie sesi, generate dengan perintah yang sama)
+   - `SEAL_SIGNING_KEY` (WAJIB untuk menyetujui sertifikat. Seed privat Ed25519, 64 karakter hex. Buat dengan `npm run seal:keygen -- <kid>`, lihat bagian "Segel Bertanda Tangan Digital")
    - `SUPABASE_SERVICE_ROLE_KEY` (Untuk akses storage admin)
 
 4. **Setup Database (Prisma)**:
@@ -123,6 +124,35 @@ erDiagram
 2. **Pengajuan**: User mengunggah detail sertifikat. Sistem akan melakukan proses steganografi secara otomatis setelah disetujui Admin.
 3. **Verifikasi**: Di halaman Verifikasi, unggah file sertifikat PNG yang telah diunduh. Sistem akan mengekstrak metadata dan mencocokkan dengan database.
 4. **Transfer**: Masukkan email penerima untuk mengalihkan hak kepemilikan sertifikat.
+
+## ✍️ Segel Bertanda Tangan Digital (v2)
+
+Setiap sertifikat yang disetujui menanam amplop `{v:2, pub, enc, sig}` ke dalam gambar lewat LSB:
+
+- `pub`: data publik yang bisa dibaca siapa saja (ID sertifikat, nomor sertifikat, `verifiedAt`, penerbit "Terrafy", `kid`).
+- `enc`: data pemilik, riwayat, dll., dienkripsi AES-256-GCM dengan `STEGANOGRAPHY_KEY`.
+- `sig`: tanda tangan Ed25519 atas prefiks domain + `pub` kanonik + `enc` (verifikasi RFC 8032 ketat).
+
+**Verifikasi (`/verifikasi`, publik)**
+- Tanda tangan diperiksa di browser (gambar tidak diunggah). Pemeriksaan offline butuh secure context (HTTPS atau localhost); di luar itu tampil "Pemeriksaan offline tidak tersedia".
+- Tombol "Cek Status Online" meminta status terkini ke server (pemilik, transfer, dicabut, segel sudah diganti). Detail pemilik hanya tampil bila gambar adalah segel terbaru.
+- Segel lama v1 (hanya AES) masih diterima secara online dan diberi label. Admin dapat menerbitkannya ulang sebagai v2 lewat tombol "Terbitkan Ulang Segel (v2)" di halaman detail sertifikat admin; gambar lama tidak lagi berstatus terbaru.
+
+**Manajemen kunci**
+- Kunci publik ada di `src/lib/seal/public-keys.ts` (`DEFAULT_KEYRING`: `activeKid`, `publicKeys`, `revokedKids`). Seed privat ada di env `SEAL_SIGNING_KEY`.
+- Persetujuan ditolak (tidak ada yang berubah) bila kunci hilang atau tidak cocok dengan kunci publik aktif.
+- Rotasi: buat `kid` baru, tambahkan ke `publicKeys`, set `activeKid`. Pertahankan `kid` lama agar segel lama tetap valid.
+- Kebocoran kunci: pindahkan `kid` ke `revokedKids`; segel yang ditandatangani dengannya gagal verifikasi.
+
+```bash
+npm run seal:keygen -- terrafy-2026-1   # cetak seed privat dan kunci publik
+```
+
+**Checklist deployment**
+- Set `SEAL_SIGNING_KEY`, `STEGANOGRAPHY_KEY`, dan `SESSION_SECRET` di environment deployment.
+- Database yang sudah ada: jalankan `prisma/sql/2026-10-23-seal-v2.sql` sekali (idempoten, transaksional), misalnya di SQL editor Supabase. Setup baru memakai `setup_database.sql` atau `prisma db push`.
+- Pakai HTTPS agar pemeriksaan offline berfungsi.
+- Cek online dibatasi 20 request/menit per IP (in-memory, per instance server). IP diambil dari `x-forwarded-for`; tanpa proxy yang mengisinya, semua pengunjung berbagi satu bucket. Deploy di belakang proxy/Vercel atau sesuaikan.
 
 ## 🧪 Testing
 
