@@ -1,5 +1,5 @@
 import prisma from "@/lib/prisma"
-import { DEFAULT_KEYRING, type Keyring } from "@/lib/seal/public-keys"
+import { DEFAULT_KEYRING, needsReseal, type Keyring } from "@/lib/seal/public-keys"
 import { type Actor, fail } from "./common"
 import { createSealedImage, loadSealSubject } from "./sealing"
 import type { CertificateStorage } from "./storage"
@@ -12,10 +12,11 @@ class StaleSealError extends Error {}
 const staleFailure = () => fail(STALE_MESSAGE, { code: "STALE" })
 
 /**
- * Replaces a legacy v1 seal with a signed v2 seal, built on the current sealed image.
+ * Replaces a legacy v1 seal, or a v2 seal signed with a retired or revoked key, with a v2 seal
+ * signed by the active key, built on the current sealed image.
  * The new image is uploaded first; metadata is swapped in one transaction afterwards, so any
- * failure leaves the v1 seal valid. The transaction re-checks that the certificate is still
- * VERIFIED with the same owner and that the v1 row is still the one we sealed from.
+ * failure leaves the old seal valid. The transaction re-checks that the certificate is still
+ * VERIFIED with the same owner and that the old row is still the one we sealed from.
  *
  * The encrypted `validator` in the new seal becomes the reissuing admin's name.
  * A failed or losing reissue may leave an unreferenced object in the verified bucket
@@ -28,7 +29,7 @@ export async function reissueSeal(admin: Actor, certId: string, storage: Certifi
 
     const current = cert.steganographyMetadata[0]
     if (!current) return fail("Sertifikat belum memiliki segel. Setujui ulang untuk menerbitkan segel.")
-    if (current.sealVersion >= 2) return fail("Segel sertifikat ini sudah versi terbaru")
+    if (!needsReseal(current, keyring)) return fail("Segel sertifikat ini sudah versi terbaru")
 
     try {
         const sealed = await createSealedImage(admin.name || "Admin", cert, storage, keyring)
@@ -41,7 +42,7 @@ export async function reissueSeal(admin: Actor, certId: string, storage: Certifi
             })
             if (updated === 0) throw new StaleSealError()
 
-            // The v1 row must still be the one we sealed from (concurrent reissue or transfer approval).
+            // The old row must still be the one we sealed from (concurrent reissue or transfer approval).
             // Throwing rolls back the image update above.
             const { count: removed } = await tx.steganographyMetadata.deleteMany({ where: { id: current.id } })
             if (removed === 0) throw new StaleSealError()
@@ -72,7 +73,7 @@ export async function reissueSeal(admin: Actor, certId: string, storage: Certifi
                     action: "REISSUE_SEAL",
                     targetType: "Certificate",
                     targetId: cert.id,
-                    details: { certificateNumber: cert.nomor_sertifikat, fromVersion: current.sealVersion, toVersion: 2, kid: sealed.metadata.signingKeyId },
+                    details: { certificateNumber: cert.nomor_sertifikat, fromVersion: current.sealVersion, fromKid: current.signingKeyId, toVersion: 2, kid: sealed.metadata.signingKeyId },
                 },
             })
         })

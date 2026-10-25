@@ -664,6 +664,35 @@ if (!TEST_DB) {
             assert.match(pending.error!, /Hanya sertifikat terverifikasi/)
         })
 
+        it("reissues a v2 seal whose signing key was revoked, with the new active key", async () => {
+            const cert = await verifiedCertificateOf(alice)
+            const { signingKeyFromSeed, publicKeyHexOf } = await import("../src/lib/seal/sign")
+            const seed2 = randomBytes(32).toString("hex")
+            const rotated = {
+                activeKid: "test-2",
+                publicKeys: { ...keyring.publicKeys, "test-2": publicKeyHexOf(signingKeyFromSeed(seed2)) },
+                revokedKids: ["test-1"],
+            }
+            const saved = process.env.SEAL_SIGNING_KEY
+            process.env.SEAL_SIGNING_KEY = seed2
+            try {
+                const res = await reissue.reissueSeal(admin, cert.id, storage, rotated)
+                assert.ok(res.success, JSON.stringify(res))
+            } finally {
+                process.env.SEAL_SIGNING_KEY = saved
+            }
+            const meta = await prisma.steganographyMetadata.findUniqueOrThrow({ where: { certificateId: cert.id } })
+            assert.equal(meta.sealVersion, 2)
+            assert.equal(meta.signingKeyId, "test-2")
+            const after = await prisma.certificate.findUniqueOrThrow({ where: { id: cert.id } })
+            const verified = await verification.verifyCertificateImage(storage.verifiedImage(after.image_url!), storage, rotated)
+            assert.ok(verified.success)
+            assert.equal(verified.isOwnerMatch, true)
+            assert.equal(verified.seal.version, 2)
+            const audit = await prisma.adminAuditLog.findFirstOrThrow({ where: { action: "REISSUE_SEAL" } })
+            assert.deepEqual(audit.details, { certificateNumber: cert.nomor_sertifikat, fromVersion: 2, fromKid: "test-1", toVersion: 2, kid: "test-2" })
+        })
+
         it("does not reseal a certificate revoked during reissue", async () => {
             const cert = await verifiedCertificateOf(alice)
             await downgradeToV1(cert.id)

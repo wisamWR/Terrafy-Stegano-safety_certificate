@@ -9,6 +9,21 @@ export type Keyring = {
     revokedKids: readonly string[]
 }
 
+/**
+ * True when a stored seal should be reissued: still legacy v1, signed with a kid that is no
+ * longer the active one, or signed with a revoked kid. Browser-safe (used by the admin UI too).
+ */
+export function needsReseal(
+    meta: { sealVersion: number; signingKeyId: string | null },
+    keyring: Keyring = DEFAULT_KEYRING,
+): boolean {
+    return (
+        meta.sealVersion < 2 ||
+        meta.signingKeyId !== keyring.activeKid ||
+        keyring.revokedKids.includes(meta.signingKeyId ?? "")
+    )
+}
+
 export const DEFAULT_KEYRING: Keyring = {
     activeKid: "terrafy-2026-1",
     publicKeys: {

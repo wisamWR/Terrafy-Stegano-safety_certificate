@@ -6,7 +6,7 @@ import {
 } from "../src/lib/seal/envelope"
 import * as ed from "@noble/ed25519"
 import { verifySeal } from "../src/lib/seal/verify"
-import { DEFAULT_KEYRING, type Keyring } from "../src/lib/seal/public-keys"
+import { DEFAULT_KEYRING, needsReseal, type Keyring } from "../src/lib/seal/public-keys"
 import { randomBytes } from "node:crypto"
 import { assertSigningReady, publicKeyHexOf, signSeal, signingKeyFromSeed } from "../src/lib/seal/sign"
 
@@ -236,5 +236,29 @@ describe("signSeal (Node crypto)", () => {
             process.env.SEAL_SIGNING_KEY = seed
             assert.throws(() => assertSigningReady({ ...keyring, revokedKids: ["test-1"] }), /dicabut/)
         })
+    })
+})
+
+describe("needsReseal", () => {
+    const ring: Keyring = { activeKid: "k2", publicKeys: { k1: "aa".repeat(32), k2: "bb".repeat(32) }, revokedKids: [] }
+
+    it("is true for legacy v1 seals", () => {
+        assert.equal(needsReseal({ sealVersion: 1, signingKeyId: null }, ring), true)
+    })
+
+    it("is false for a v2 seal signed with the active kid", () => {
+        assert.equal(needsReseal({ sealVersion: 2, signingKeyId: "k2" }, ring), false)
+    })
+
+    it("is true for a v2 seal signed with a retired kid", () => {
+        assert.equal(needsReseal({ sealVersion: 2, signingKeyId: "k1" }, ring), true)
+    })
+
+    it("is true for a v2 seal whose kid is revoked, even if it is still the active kid", () => {
+        assert.equal(needsReseal({ sealVersion: 2, signingKeyId: "k2" }, { ...ring, revokedKids: ["k2"] }), true)
+    })
+
+    it("is true for a v2 seal without a recorded kid", () => {
+        assert.equal(needsReseal({ sealVersion: 2, signingKeyId: null }, ring), true)
     })
 })

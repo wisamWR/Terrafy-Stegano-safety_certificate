@@ -5,6 +5,7 @@ import { useEffect, use, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { getCertificateById, reissueSeal, updateCertificateStatus } from "@/lib/actions/certificates";
+import { DEFAULT_KEYRING, needsReseal } from "@/lib/seal/public-keys";
 import {
     ArrowLeft,
     MapPin,
@@ -436,10 +437,17 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
                                                 {certificate.steganographyMetadata.sealVersion >= 2
                                                     ? `Segel v2 · ditandatangani digital (kunci ${certificate.steganographyMetadata.signingKeyId})`
                                                     : "Segel lama v1 · tanpa tanda tangan digital"}
+                                                {certificate.steganographyMetadata.signingKeyId &&
+                                                    DEFAULT_KEYRING.revokedKids.includes(certificate.steganographyMetadata.signingKeyId) &&
+                                                    " — kunci dicabut"}
                                             </p>
-                                            {certificate.steganographyMetadata.sealVersion < 2 && (
+                                            {needsReseal(certificate.steganographyMetadata) && (
                                                 <Button variant="outline" className="w-full" disabled={isReissuing} onClick={handleReissue}>
-                                                    {isReissuing ? "Menerbitkan ulang..." : "Terbitkan Ulang Segel (v2)"}
+                                                    {isReissuing
+                                                        ? "Menerbitkan ulang..."
+                                                        : certificate.steganographyMetadata.sealVersion < 2
+                                                          ? "Terbitkan Ulang Segel (v2)"
+                                                          : "Terbitkan Ulang Segel (kunci baru)"}
                                                 </Button>
                                             )}
                                         </div>

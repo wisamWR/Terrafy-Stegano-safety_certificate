@@ -14,8 +14,8 @@ export function loadSealSubject(certId: string) {
         include: {
             owner: { select: { name: true } },
             history: { orderBy: { createdAt: "asc" }, select: { action: true, owner_name: true, createdAt: true } },
-            // sealVersion is read by the reissue flow
-            steganographyMetadata: { select: { id: true, sealVersion: true }, take: 1 },
+            // sealVersion and signingKeyId are read by the reissue flow
+            steganographyMetadata: { select: { id: true, sealVersion: true, signingKeyId: true }, take: 1 },
         },
     })
 }
