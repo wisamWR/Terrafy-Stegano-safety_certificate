@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, use, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { getCertificateById, updateCertificateStatus } from "@/lib/actions/certificates";
+import { getCertificateById, reissueSeal, updateCertificateStatus } from "@/lib/actions/certificates";
 import {
     ArrowLeft,
     MapPin,
@@ -195,7 +195,25 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
     const [certificate, setCertificate] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [successStatus, setSuccessStatus] = useState<"approved" | "rejected" | null>(null);
-    const [imageZoomOpen, setImageZoomOpen] = useState(false); 
+    const [imageZoomOpen, setImageZoomOpen] = useState(false);
+    const [isReissuing, setIsReissuing] = useState(false);
+
+    const handleReissue = async () => {
+        setIsReissuing(true);
+        const result = await reissueSeal(id);
+        if (result.success) {
+            const refreshed = await getCertificateById(id);
+            if (refreshed.success && refreshed.certificate) setCertificate(refreshed.certificate);
+        } else {
+            alert(result.error);
+            if (result.code === "STALE") {
+                // Certificate changed meanwhile: refresh so the panel reflects reality.
+                const refreshed = await getCertificateById(id);
+                if (refreshed.success && refreshed.certificate) setCertificate(refreshed.certificate);
+            }
+        }
+        setIsReissuing(false);
+    };
 
     const handleAction = async (action: "approve" | "reject", reason?: string) => {
         setIsProcessing(true);
@@ -404,6 +422,20 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
                                         <p className="text-sm text-red-600 mt-2 bg-red-50 p-2 rounded border border-red-100">
                                             "{certificate.rejectionReason}"
                                         </p>
+                                    )}
+                                    {certificate.status === "VERIFIED" && certificate.steganographyMetadata && (
+                                        <div className="mt-4 space-y-2">
+                                            <p className="text-xs text-muted-foreground">
+                                                {certificate.steganographyMetadata.sealVersion >= 2
+                                                    ? `Segel v2 · ditandatangani digital (kunci ${certificate.steganographyMetadata.signingKeyId})`
+                                                    : "Segel lama v1 · tanpa tanda tangan digital"}
+                                            </p>
+                                            {certificate.steganographyMetadata.sealVersion < 2 && (
+                                                <Button variant="outline" className="w-full" disabled={isReissuing} onClick={handleReissue}>
+                                                    {isReissuing ? "Menerbitkan ulang..." : "Terbitkan Ulang Segel (v2)"}
+                                                </Button>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             )}
