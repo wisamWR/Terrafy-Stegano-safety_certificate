@@ -34,7 +34,7 @@ export function revealFromPngBytes(bytes: Uint8Array): RevealResult {
     }
 
     try {
-        return { kind: "found", text: new TextDecoder().decode(extractFromRGBA(rgba)) }
+        return { kind: "found", text: new TextDecoder("utf-8", { ignoreBOM: true }).decode(extractFromRGBA(rgba)) }
     } catch (error) {
         if (error instanceof LsbNotFoundError || error instanceof LsbCorruptError) return { kind: "none" }
         throw error

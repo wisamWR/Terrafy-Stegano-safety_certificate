@@ -70,6 +70,12 @@ describe("checkSealLocally", () => {
         assert.deepEqual(await checkSealLocally(await Steganography.embed(cover(), "not a seal"), keyring), { state: "invalid", reason: "malformed" })
     })
 
+    it("keeps a leading BOM so the browser agrees with the server and rejects the envelope", async () => {
+        const { text } = await sealedSeal()
+        const withBom = await Steganography.embed(cover(), "﻿" + text)
+        assert.deepEqual(await checkSealLocally(withBom, keyring), { state: "invalid", reason: "malformed" })
+    })
+
     it("passes revoked and unknown kids through", async () => {
         const image = await sealedImage()
         assert.deepEqual(await checkSealLocally(image, { ...keyring, revokedKids: ["test-1"] }), { state: "invalid", reason: "revoked_kid" })

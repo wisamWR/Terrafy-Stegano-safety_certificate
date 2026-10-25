@@ -31,7 +31,7 @@ function loadActiveSigningKey(keyring: Keyring): KeyObject {
     if (keyring.revokedKids.includes(keyring.activeKid)) throw new Error(`kid aktif "${keyring.activeKid}" telah dicabut; rotasi kunci dulu`)
     const key = signingKeyFromSeed(process.env.SEAL_SIGNING_KEY)
     const expected = Object.hasOwn(keyring.publicKeys, keyring.activeKid) ? keyring.publicKeys[keyring.activeKid] : undefined
-    if (!expected || publicKeyHexOf(key) !== expected.toLowerCase()) {
+    if (!expected || !/^[0-9a-f]{64}$/.test(expected) || publicKeyHexOf(key) !== expected) {
         throw new Error(`SEAL_SIGNING_KEY tidak cocok dengan kunci publik "${keyring.activeKid}" di src/lib/seal/public-keys.ts`)
     }
     return key

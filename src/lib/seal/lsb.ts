@@ -42,7 +42,7 @@ export function embedIntoRGBA(rgba: Uint8Array, message: Uint8Array): void {
     const needed = full.length * 8
     const capacity = (rgba.length / 4) * 3
     if (needed > capacity) {
-        throw new LsbCapacityError(`Image is too small. Needs ${needed} bits, has ${capacity} capacity.`)
+        throw new LsbCapacityError(`Gambar terlalu kecil untuk menampung segel (image is too small: needs ${needed} bits, has ${capacity}).`)
     }
 
     let ch = 0

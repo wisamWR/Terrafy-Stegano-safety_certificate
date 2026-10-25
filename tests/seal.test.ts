@@ -226,6 +226,12 @@ describe("signSeal (Node crypto)", () => {
             assert.throws(() => assertSigningReady(keyring), /tidak cocok/)
         })
 
+        it("throws when the published key is not lowercase hex", () => {
+            process.env.SEAL_SIGNING_KEY = seed
+            const upper = { ...keyring, publicKeys: { "test-1": keyring.publicKeys["test-1"].toUpperCase() } }
+            assert.throws(() => assertSigningReady(upper), /tidak cocok.*test-1/)
+        })
+
         it("throws when the active kid is revoked", () => {
             process.env.SEAL_SIGNING_KEY = seed
             assert.throws(() => assertSigningReady({ ...keyring, revokedKids: ["test-1"] }), /dicabut/)
