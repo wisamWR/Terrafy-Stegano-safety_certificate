@@ -69,9 +69,18 @@ function headerState(result: Certificate): { tone: HeaderTone; title: string; su
 }
 
 
-function notCurrentCopy(status: string | undefined): { badge: string; heading: string; text: string; advice: string | null } {
+type NotCurrentTone = "red" | "amber"
+
+const NOT_CURRENT_TONES: Record<NotCurrentTone, { cardBorder: string; box: string; icon: string; advice: string }> = {
+    red: { cardBorder: "border-red-300/50", box: "bg-red-500/15 border-2 border-red-400/50 text-red-950", icon: "bg-red-500", advice: "border-red-300/50" },
+    amber: { cardBorder: "border-amber-300/50", box: "bg-amber-500/15 border-2 border-amber-400/50 text-amber-950", icon: "bg-amber-500", advice: "border-amber-300/50" },
+}
+
+function notCurrentCopy(status: string | undefined): { tone: NotCurrentTone; chip: string; badge: string; heading: string; text: string; advice: string | null } {
     if (status === "REJECTED") {
         return {
+            tone: "red",
+            chip: "Revoked",
             badge: "REVOKED",
             heading: "Sertifikat Telah Dicabut",
             text: "Segel pada gambar ini asli, tetapi sertifikat sudah tidak berlaku menurut data terkini.",
@@ -79,6 +88,8 @@ function notCurrentCopy(status: string | undefined): { badge: string; heading: s
         }
     }
     return {
+        tone: "amber",
+        chip: "Outdated",
         badge: "OUTDATED",
         heading: "Segel Tidak Terbaru",
         text: "Gambar ini bukan segel terbaru sertifikat ini (kepemilikan berpindah atau segel telah diperbarui). Data pemilik terkini dilindungi.",
@@ -93,6 +104,7 @@ export default function VerificationPage() {
     const [imageZoomOpen, setImageZoomOpen] = useState(false);
     const [result, setResult] = useState<Certificate | null>(null);
     const copy = notCurrentCopy(result?.status);
+    const notCurrentTone = NOT_CURRENT_TONES[copy.tone];
 
     // Object URL for previewing the uploaded file; created in the change handler, revoked on replace/unmount
     const [fileUrl, setFileUrl] = useState<string | null>(null);
@@ -324,7 +336,7 @@ export default function VerificationPage() {
                                 </Card>
 
                                 {/* Certificate Info Card */}
-                                <Card className={`glass-card border-white/50 shadow-glass-lg ${!result.isOwnerMatch ? "border-amber-300/50" : "border-emerald-300/50"}`}>
+                                <Card className={`glass-card border-white/50 shadow-glass-lg ${!result.isOwnerMatch ? notCurrentTone.cardBorder : "border-emerald-300/50"}`}>
                                     <CardHeader className="pb-4">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-3">
@@ -343,9 +355,9 @@ export default function VerificationPage() {
                                     </CardHeader>
                                     <CardContent className="space-y-8">
                                         {!result.isOwnerMatch && (
-                                            <div className="rounded-xl bg-amber-500/15 border-2 border-amber-400/50 p-6 text-amber-950 shadow-sm animate-in zoom-in-95 duration-500">
+                                            <div className={`rounded-xl ${notCurrentTone.box} p-6 shadow-sm animate-in zoom-in-95 duration-500`}>
                                                 <div className="flex items-start gap-4">
-                                                    <div className="bg-amber-500 p-2 rounded-full shadow-md shrink-0">
+                                                    <div className={`${notCurrentTone.icon} p-2 rounded-full shadow-md shrink-0`}>
                                                         <ShieldAlert className="h-5 w-5 text-white" />
                                                     </div>
                                                     <div>
@@ -354,7 +366,7 @@ export default function VerificationPage() {
                                                             {copy.text}
                                                         </p>
                                                         {copy.advice && (
-                                                            <div className="mt-4 p-3 bg-white/40 rounded-lg text-xs font-semibold italic border border-amber-300/50">
+                                                            <div className={`mt-4 p-3 bg-white/40 rounded-lg text-xs font-semibold italic border ${notCurrentTone.advice}`}>
                                                                 {copy.advice}
                                                             </div>
                                                         )}
@@ -418,7 +430,7 @@ export default function VerificationPage() {
                                                             </div>
                                                             <p className="text-lg font-bold text-red-700">{result.imageOwnerName}</p>
                                                             <div className="text-[10px] font-bold text-red-500 mt-2 flex items-center gap-1.5 uppercase tracking-tight bg-white/40 w-fit px-2.5 py-1 rounded-full border border-red-200/50">
-                                                                <AlertCircle className="h-2.5 w-2.5" /> Outdated
+                                                                <AlertCircle className="h-2.5 w-2.5" /> {copy.chip}
                                                             </div>
                                                         </div>
                                                     )}
