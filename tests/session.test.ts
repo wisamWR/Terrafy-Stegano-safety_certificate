@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { randomBytes } from "node:crypto"
 import { signSession, verifySession } from "../src/lib/session"
 import { getEncryptionKey, getLegacyDecryptionKeys } from "../src/lib/crypto-key"
-import { allowRequest, clearLoginFailures, loginRetryAfter, recordLoginFailure } from "../src/lib/rate-limit"
+import { allowRequest, clearLoginFailures, loginRetryAfter, recordLoginFailure, requestWindowCount } from "../src/lib/rate-limit"
 
 const user = { id: "u1", name: "A", email: "a@x.id", role: "USER" as const }
 const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url")
@@ -92,10 +92,24 @@ describe("request rate limit", () => {
         const t0 = 3_000_000
         const tag = Math.random()
         for (let i = 0; i < 10_050; i++) allowRequest(`flood-${tag}-${i}`, 1, 1_000, t0)
+        assert.ok(requestWindowCount() > 10_000)
         const later = t0 + 5_000
         assert.equal(allowRequest(`fresh-${tag}`, 1, 1_000, later), true)
+        assert.ok(requestWindowCount() <= 2, `expired entries should be pruned, got ${requestWindowCount()}`)
         assert.equal(allowRequest(`fresh-${tag}`, 1, 1_000, later), false)
         // an expired flood key starts a fresh window
         assert.equal(allowRequest(`flood-${tag}-0`, 1, 1_000, later), true)
+    })
+
+    it("prune does not delete live entries", () => {
+        const t0 = 4_000_000
+        const tag = Math.random()
+        const longKey = `long-${tag}`
+        assert.equal(allowRequest(longKey, 1, 600_000, t0), true)
+        assert.equal(allowRequest(longKey, 1, 600_000, t0), false)
+        for (let i = 0; i < 10_050; i++) allowRequest(`flood-${tag}-${i}`, 1, 1_000, t0)
+        const later = t0 + 5_000
+        assert.equal(allowRequest(`fresh-${tag}`, 1, 1_000, later), true)
+        assert.equal(allowRequest(longKey, 1, 600_000, later), false)
     })
 })

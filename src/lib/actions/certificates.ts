@@ -157,7 +157,7 @@ export async function markAllNotificationsAsRead() {
 /** Public: anyone may check an image, no login required. Rate limited per IP (20/min). */
 export async function verifyCertificateImage(formData: FormData) {
     const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
-    // Check before reading the upload so a blocked caller's file is never buffered.
+    // Check first so a blocked caller's upload is not copied or processed (Next has already parsed the body).
     const allowed = allowRequest(`verify|${ip}`, 20, 60_000)
     const file = allowed ? await readFile(formData) : null
     return respond("Terjadi kesalahan sistem saat verifikasi", async () => {
