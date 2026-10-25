@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator"
 import Image from "next/image"
 
 import { verifyCertificateImage } from "@/lib/actions/certificates";
+import { LocalSealCheck } from "@/components/LocalSealCheck";
 import {
     Dialog,
     DialogContent,
@@ -30,7 +31,7 @@ interface Certificate {
     isOwnerMatch?: boolean;
     imageOwnerName?: string;
     status: string;
-    transferToEmail?: string | null;
+    seal?: { version: 1 | 2; signed: boolean; kid?: string; issuedAt?: string };
     history: {
         name: string;
         email: string | null;
@@ -39,6 +40,34 @@ interface Certificate {
         note: string | null;
     }[];
 }
+
+type HeaderTone = "emerald" | "amber" | "blue" | "red"
+
+const HEADER_TONES: Record<HeaderTone, { box: string; icon: string; title: string; subtitle: string; badge: string }> = {
+    emerald: { box: "bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_15px_-5px_rgba(16,185,129,0.2)]", icon: "bg-emerald-500", title: "text-emerald-900 dark:text-emerald-200", subtitle: "text-emerald-700 dark:text-emerald-300", badge: "bg-emerald-600 text-white" },
+    amber: { box: "bg-amber-500/10 border-amber-400/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.2)]", icon: "bg-amber-500", title: "text-amber-900 dark:text-amber-200", subtitle: "text-amber-700 dark:text-amber-300", badge: "bg-amber-600 text-white" },
+    blue: { box: "bg-blue-500/10 border-blue-400/30 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)]", icon: "bg-blue-500", title: "text-blue-900 dark:text-blue-200", subtitle: "text-blue-700 dark:text-blue-300", badge: "bg-blue-600 text-white" },
+    red: { box: "bg-red-500/10 border-red-400/30 shadow-[0_0_15px_-5px_rgba(239,68,68,0.2)]", icon: "bg-red-500", title: "text-red-900 dark:text-red-200", subtitle: "text-red-700 dark:text-red-300", badge: "bg-red-600 text-white" },
+}
+
+function headerState(result: Certificate): { tone: HeaderTone; title: string; subtitle: string; badge: string } {
+    if (result.status === "REJECTED") {
+        return { tone: "red", title: "Sertifikat Tidak Berlaku", subtitle: "⛔ Segel asli, tetapi sertifikat ini telah dicabut/ditolak menurut data terkini.", badge: "Revoked" }
+    }
+    if (result.status === "TRANSFER_PENDING" || result.status === "AWAITING_RECIPIENT") {
+        return {
+            tone: "blue",
+            title: "Proses Pengalihan Hak",
+            subtitle: "ℹ️ Sertifikat ini sedang dalam proses transfer kepemilikan.",
+            badge: result.status === "TRANSFER_PENDING" ? "Transfer Pending" : "Awaiting Recipient",
+        }
+    }
+    if (!result.isOwnerMatch) {
+        return { tone: "amber", title: "Segel Tidak Terbaru", subtitle: "⚠️ Gambar ini bukan segel terbaru (pindah tangan atau segel telah diperbarui).", badge: "Outdated" }
+    }
+    return { tone: "emerald", title: "Sertifikat Valid & Asli", subtitle: "✅ Selamat! Integritas data digital terverifikasi sepenuhnya.", badge: "Verified" }
+}
+
 
 export default function VerificationPage() {
     const [file, setFile] = useState<File | null>(null)
@@ -74,7 +103,8 @@ export default function VerificationPage() {
                 setResult({
                     ...response.certificate,
                     isOwnerMatch: response.isOwnerMatch,
-                    imageOwnerName: response.imageOwnerName
+                    imageOwnerName: response.imageOwnerName,
+                    seal: response.seal
                 });
                 setStatus("success");
             } else {
@@ -154,13 +184,15 @@ export default function VerificationPage() {
                                 ) : (
                                     <>
                                         <ShieldCheck className="h-6 w-6" />
-                                        Verifikasi
+                                        Cek Status Online
                                     </>
                                 )}
                             </Button>
                         </div>
                     </CardContent>
                 </Card>
+
+                {file && <LocalSealCheck file={file} />}
 
                 {/* Error State */}
                 {status === "error" && (
@@ -186,46 +218,33 @@ export default function VerificationPage() {
                 {status === "success" && result && (
                     <div className="animate-in fade-in slide-in-from-bottom-6 space-y-8 pb-20">
                         {/* Header Status - SLIM VERSION */}
-                        <div className={`rounded-xl p-5 flex flex-col md:flex-row items-center justify-between border shadow-glass backdrop-blur-md ${!result.isOwnerMatch
-                            ? "bg-amber-500/10 border-amber-400/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.2)]"
-                            : "bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_15px_-5px_rgba(16,185,129,0.2)]"
-                            }`}>
-                            <div className="flex items-center gap-4 mb-3 md:mb-0">
-                                <div className={`p-2.5 rounded-xl shadow-md border border-white/20 ${!result.isOwnerMatch ? "bg-amber-500" : "bg-emerald-500"}`}>
-                                    {!result.isOwnerMatch ? <ShieldAlert className="h-6 w-6 text-white" /> : <ShieldCheck className="h-6 w-6 text-white" />}
+                        {(() => {
+                            const header = headerState(result)
+                            const tone = HEADER_TONES[header.tone]
+                            return (
+                                <div className={`rounded-xl p-5 flex flex-col md:flex-row items-center justify-between border shadow-glass backdrop-blur-md ${tone.box}`}>
+                                    <div className="flex items-center gap-4 mb-3 md:mb-0">
+                                        <div className={`p-2.5 rounded-xl shadow-md border border-white/20 ${tone.icon}`}>
+                                            {header.tone === "emerald" ? <ShieldCheck className="h-6 w-6 text-white" /> : <ShieldAlert className="h-6 w-6 text-white" />}
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            <h2 className={`text-xl font-bold tracking-tight ${tone.title}`}>{header.title}</h2>
+                                            <p className={`text-sm font-semibold opacity-90 ${tone.subtitle}`}>{header.subtitle}</p>
+                                            {result.seal && (
+                                                <p className="text-xs text-slate-600 dark:text-slate-400">
+                                                    {result.seal.signed
+                                                        ? `Segel v2 · ditandatangani digital (kunci ${result.seal.kid})`
+                                                        : "Segel lama v1 · tanpa tanda tangan digital"}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className={`px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.2em] shadow-sm ${tone.badge}`}>
+                                        {header.badge}
+                                    </div>
                                 </div>
-                                <div className="space-y-0.5">
-                                    <h2 className={`text-xl font-bold tracking-tight ${result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                        ? "text-blue-900 dark:text-blue-200"
-                                        : !result.isOwnerMatch ? "text-amber-900 dark:text-amber-200" : "text-emerald-900 dark:text-emerald-200"
-                                        }`}>
-                                        {result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                            ? "Proses Pengalihan Hak"
-                                            : !result.isOwnerMatch ? "Sertifikat Pindah Tangan" : "Sertifikat Valid & Asli"}
-                                    </h2>
-                                    <p className={`text-sm font-semibold opacity-90 ${result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                        ? "text-blue-700 dark:text-blue-300"
-                                        : !result.isOwnerMatch ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"
-                                        }`}>
-                                        {result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                            ? "ℹ️ Sertifikat ini sedang dalam proses transfer kepemilikan."
-                                            : !result.isOwnerMatch
-                                                ? "⚠️ Peringatan: Data fisik gambar (stego) sudah lama."
-                                                : "✅ Selamat! Integritas data digital terverifikasi sepenuhnya."}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className={`px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.2em] shadow-sm ${result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                ? "bg-blue-600 text-white"
-                                : !result.isOwnerMatch
-                                    ? "bg-amber-600 text-white"
-                                    : "bg-emerald-600 text-white"
-                                }`}>
-                                {result.status === 'TRANSFER_PENDING' ? "Transfer Pending"
-                                    : result.status === 'AWAITING_RECIPIENT' ? "Awaiting Recipient"
-                                        : !result.isOwnerMatch ? "Outdated" : "Verified"}
-                            </div>
-                        </div>
+                            )
+                        })()}
 
                         <div className="grid gap-8 md:grid-cols-3">
                             {/* Left Column (2/3): Image & Info */}
