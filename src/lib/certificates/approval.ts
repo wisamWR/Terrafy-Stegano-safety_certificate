@@ -45,6 +45,8 @@ export async function reviewCertificate(
         try {
             assertSigningReady(keyring)
         } catch (error) {
+            // Message only: never log key material. Operators need this in server logs, the admin only sees the toast.
+            console.error("[SEAL] Signing key not ready:", (error as Error).message)
             return fail("Gagal menerbitkan segel: " + (error as Error).message)
         }
     }

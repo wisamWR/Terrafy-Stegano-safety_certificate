@@ -38,7 +38,7 @@ export function LocalSealCheck({ file }: { file: File }) {
                     tone: "border-emerald-300 bg-emerald-500/10",
                     icon: <ShieldCheck className="h-6 w-6 text-emerald-600" />,
                     title: "Tanda tangan digital valid",
-                    body: `Diterbitkan ${verdict.issuer} · No. ${verdict.serial} · ${new Date(verdict.issuedAt).toLocaleDateString("id-ID", { dateStyle: "long" })} · kunci ${verdict.kid}. Keaslian segel terverifikasi; untuk status kepemilikan terkini gunakan Cek Status Online.`,
+                    body: `Diterbitkan ${verdict.issuer} · No. ${verdict.serial} · ${new Date(verdict.issuedAt).toLocaleDateString("id-ID", { dateStyle: "long" })} · kunci ${verdict.kid}. Pastikan nomor dan data yang tercetak pada gambar sesuai. Status berlaku (dicabut, pindah tangan) hanya dapat dipastikan lewat Cek Status Online.`,
                 }
             case "invalid":
                 return { tone: "border-red-300 bg-red-500/10", icon: <ShieldX className="h-6 w-6 text-red-600" />, title: "Tanda tangan digital tidak valid", body: INVALID_TEXT[verdict.reason] }
