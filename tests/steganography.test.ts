@@ -77,6 +77,17 @@ describe("Steganography", () => {
         await assert.rejects(() => Steganography.reveal(Buffer.from("not an image")), /PNG/)
     })
 
+    it("rejects an image whose header claims too many pixels before decoding it", async () => {
+        const bomb = Buffer.from(makePng(8, 8))
+        bomb.writeUInt32BE(100000, 16)
+        bomb.writeUInt32BE(100000, 20)
+        for (const op of [() => Steganography.reveal(bomb), () => Steganography.embed(bomb, "x")]) {
+            const t0 = performance.now()
+            await assert.rejects(op, /terlalu besar/)
+            assert.ok(performance.now() - t0 < 1000)
+        }
+    })
+
     it("handles a large image quickly", async () => {
         const cover = makePng(1500, 1500)
         const msg = "q".repeat(5000)

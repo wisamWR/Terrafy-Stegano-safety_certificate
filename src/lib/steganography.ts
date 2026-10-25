@@ -1,5 +1,6 @@
 import { PNG } from 'pngjs';
 import { embedIntoRGBA, extractFromRGBA } from '@/lib/seal/lsb';
+import { MAX_PIXELS, pngDimensions } from '@/lib/seal/png-header';
 
 /**
  * LSB steganography for PNG images (server side). The bit layout lives in src/lib/seal/lsb.ts,
@@ -7,6 +8,10 @@ import { embedIntoRGBA, extractFromRGBA } from '@/lib/seal/lsb';
  */
 export class Steganography {
     private static decode(inputBuffer: Buffer): PNG {
+        // Check the IHDR claim first: pngjs allocates width*height*4 bytes before validating pixel data.
+        const size = pngDimensions(inputBuffer);
+        if (!size) throw new Error('Format file corrupt atau bukan PNG valid.');
+        if (size.width * size.height > MAX_PIXELS) throw new Error('Gambar terlalu besar untuk diproses.');
         try {
             return PNG.sync.read(inputBuffer);
         } catch {
