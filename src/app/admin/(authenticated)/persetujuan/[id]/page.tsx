@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, use, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { getCertificateById, updateCertificateStatus } from "@/lib/actions/certificates";
+import { getCertificateById, reissueSeal, updateCertificateStatus } from "@/lib/actions/certificates";
+import { DEFAULT_KEYRING, needsReseal } from "@/lib/seal/public-keys";
 import {
     ArrowLeft,
     MapPin,
@@ -195,7 +196,32 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
     const [certificate, setCertificate] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [successStatus, setSuccessStatus] = useState<"approved" | "rejected" | null>(null);
-    const [imageZoomOpen, setImageZoomOpen] = useState(false); 
+    const [imageZoomOpen, setImageZoomOpen] = useState(false);
+    const [isReissuing, setIsReissuing] = useState(false);
+
+    const refreshCertificate = async () => {
+        const refreshed = await getCertificateById(id);
+        if (refreshed.success && refreshed.certificate) setCertificate(refreshed.certificate);
+    };
+
+    const handleReissue = async () => {
+        setIsReissuing(true);
+        try {
+            const result = await reissueSeal(id);
+            if (result.success) {
+                await refreshCertificate();
+                alert("Segel berhasil diterbitkan ulang (v2). Pemilik telah diberi notifikasi.");
+            } else {
+                alert(result.error);
+                if (result.code === "STALE") {
+                    // Certificate changed meanwhile: refresh so the panel reflects reality.
+                    await refreshCertificate();
+                }
+            }
+        } finally {
+            setIsReissuing(false);
+        }
+    };
 
     const handleAction = async (action: "approve" | "reject", reason?: string) => {
         setIsProcessing(true);
@@ -404,6 +430,27 @@ export default function ApprovalDetailPage({ params }: { params: Promise<{ id: s
                                         <p className="text-sm text-red-600 mt-2 bg-red-50 p-2 rounded border border-red-100">
                                             "{certificate.rejectionReason}"
                                         </p>
+                                    )}
+                                    {certificate.status === "VERIFIED" && certificate.steganographyMetadata && (
+                                        <div className="mt-4 space-y-2">
+                                            <p className="text-xs text-muted-foreground">
+                                                {certificate.steganographyMetadata.sealVersion >= 2
+                                                    ? `Segel v2 · ditandatangani digital (kunci ${certificate.steganographyMetadata.signingKeyId})`
+                                                    : "Segel lama v1 · tanpa tanda tangan digital"}
+                                                {certificate.steganographyMetadata.signingKeyId &&
+                                                    DEFAULT_KEYRING.revokedKids.includes(certificate.steganographyMetadata.signingKeyId) &&
+                                                    " — kunci dicabut"}
+                                            </p>
+                                            {needsReseal(certificate.steganographyMetadata) && (
+                                                <Button variant="outline" className="w-full" disabled={isReissuing} onClick={handleReissue}>
+                                                    {isReissuing
+                                                        ? "Menerbitkan ulang..."
+                                                        : certificate.steganographyMetadata.sealVersion < 2
+                                                          ? "Terbitkan Ulang Segel (v2)"
+                                                          : "Terbitkan Ulang Segel (kunci baru)"}
+                                                </Button>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             )}

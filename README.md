@@ -2,6 +2,8 @@
 
 Sistem manajemen sertifikat digital berbasis web yang mengintegrasikan teknik **Kriptografi** dan **Steganografi** untuk menjamin keamanan, keaslian, dan integritas data sertifikat. Proyek ini dikembangkan sebagai tugas akhir untuk memfasilitasi pengelolaan sertifikat tanah/sawah secara digital dengan perlindungan data berlapis.
 
+> 🌐 **Live Demo (You can try it):** [https://terrafy-stegano-safety-certificate.vercel.app/](https://terrafy-stegano-safety-certificate.vercel.app/)
+
 ## 🌟 Fitur Utama
 
 - **Pendaftaran Sertifikat**: Pengguna dapat mengajukan sertifikat tanah/sawah dengan detail lokasi (koordinat), luas, dan nomor sertifikat.
@@ -98,7 +100,9 @@ erDiagram
    Buka file `.env` dan isi variabel berikut:
    - `DATABASE_URL` & `DIRECT_URL` (dari setting Database Supabase)
    - `NEXT_PUBLIC_SUPABASE_URL` & `ANON_KEY` (dari setting API Supabase)
-   - `STEGANOGRAPHY_KEY` (Generate random 32-byte hex string untuk keamanan)
+   - `STEGANOGRAPHY_KEY` (WAJIB. 32-byte hex untuk AES-256-GCM: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
+   - `SESSION_SECRET` (WAJIB. Minimal 32 karakter acak untuk menandatangani cookie sesi, generate dengan perintah yang sama)
+   - `SEAL_SIGNING_KEY` (WAJIB untuk menyetujui sertifikat. Seed privat Ed25519, 64 karakter hex. Buat dengan `npm run seal:keygen -- <kid>`, lihat bagian "Segel Bertanda Tangan Digital")
    - `SUPABASE_SERVICE_ROLE_KEY` (Untuk akses storage admin)
 
 4. **Setup Database (Prisma)**:
@@ -120,6 +124,70 @@ erDiagram
 2. **Pengajuan**: User mengunggah detail sertifikat. Sistem akan melakukan proses steganografi secara otomatis setelah disetujui Admin.
 3. **Verifikasi**: Di halaman Verifikasi, unggah file sertifikat PNG yang telah diunduh. Sistem akan mengekstrak metadata dan mencocokkan dengan database.
 4. **Transfer**: Masukkan email penerima untuk mengalihkan hak kepemilikan sertifikat.
+
+## ✍️ Segel Bertanda Tangan Digital (v2)
+
+Setiap sertifikat yang disetujui menanam amplop `{v:2, pub, enc, sig}` ke dalam gambar lewat LSB:
+
+- `pub`: data publik yang bisa dibaca siapa saja (ID sertifikat, nomor sertifikat, `verifiedAt`, penerbit "Terrafy", `kid`).
+- `enc`: data pemilik, riwayat, dll., dienkripsi AES-256-GCM dengan `STEGANOGRAPHY_KEY`.
+- `sig`: tanda tangan Ed25519 atas prefiks domain + `pub` kanonik + `enc` (verifikasi RFC 8032 ketat).
+
+**Verifikasi (`/verifikasi`, publik)**
+- Tanda tangan diperiksa di browser (gambar tidak diunggah). Pemeriksaan offline butuh secure context (HTTPS atau localhost); di luar itu tampil "Pemeriksaan offline tidak tersedia".
+- Pemeriksaan offline hanya memverifikasi data segel, bukan piksel yang terlihat pada gambar. Selalu bandingkan nomor dan data yang tercetak pada gambar dengan data segel, dan gunakan Cek Status Online untuk status terkini (dicabut, pindah tangan).
+- Tombol "Cek Status Online" meminta status terkini ke server (pemilik, transfer, dicabut, segel sudah diganti). Detail pemilik hanya tampil bila gambar adalah segel terbaru.
+- Segel lama v1 (hanya AES) masih diterima secara online dan diberi label. Admin dapat menerbitkannya ulang sebagai v2 lewat tombol "Terbitkan Ulang Segel (v2)" di halaman detail sertifikat admin; gambar lama tidak lagi berstatus terbaru.
+- Segel v2 yang ditandatangani dengan `kid` lama (bukan `activeKid`) atau `kid` yang dicabut juga dapat diterbitkan ulang dari halaman yang sama ("Terbitkan Ulang Segel (kunci baru)"), sehingga pencabutan kunci tidak membuat sertifikat terkait tanpa segel yang valid.
+- `ALLOW_LEGACY_STEGO_KEY=true` membuat segel v1 dapat dipalsukan, karena kunci enkripsi lamanya bersifat publik. Aktifkan hanya sementara sampai semua segel v1 diterbitkan ulang, lalu hapus.
+
+**Manajemen kunci**
+- Kunci publik ada di `src/lib/seal/public-keys.ts` (`DEFAULT_KEYRING`: `activeKid`, `publicKeys`, `revokedKids`). Seed privat ada di env `SEAL_SIGNING_KEY`.
+- Persetujuan ditolak (tidak ada yang berubah) bila kunci hilang atau tidak cocok dengan kunci publik aktif.
+- Rotasi: buat `kid` baru, tambahkan ke `publicKeys`, set `activeKid`. Pertahankan `kid` lama agar segel lama tetap valid.
+- Kebocoran kunci: pindahkan `kid` ke `revokedKids`; segel yang ditandatangani dengannya gagal verifikasi. Setelah rotasi, terbitkan ulang segel tersebut dari halaman admin.
+
+```bash
+npm run seal:keygen -- terrafy-2026-1   # cetak seed privat dan kunci publik
+```
+
+**Checklist deployment**
+- Set `SEAL_SIGNING_KEY`, `STEGANOGRAPHY_KEY`, dan `SESSION_SECRET` di environment deployment.
+- Database yang sudah ada: jalankan `prisma/sql/2026-10-23-seal-v2.sql` sekali (idempoten, transaksional), misalnya di SQL editor Supabase. Setup baru memakai `setup_database.sql` atau `prisma db push`.
+- Pakai HTTPS agar pemeriksaan offline berfungsi.
+- Cek online dibatasi 20 request/menit per IP (in-memory, per instance server). Pembatas memakai nilai pertama header `x-forwarded-for`, yang dapat diisi sendiri oleh klien kecuali reverse proxy menimpanya (Vercel melakukannya; `next start` polos atau nginx dengan `proxy_add_x_forwarded_for` tidak). Deploy di belakang proxy yang menimpa/menetapkan header ini; tanpa itu pembatas mudah dilewati. Hal yang sama berlaku untuk pembatas login.
+
+## 🧪 Testing
+
+```bash
+npm run typecheck          # TypeScript (build juga gagal bila ada error tipe)
+npm test                   # unit test: steganografi, LSB, segel (envelope, tanda tangan, pemeriksaan offline), sesi, storage
+```
+
+Test integrasi menjalankan seluruh alur (registrasi, approval + segel stego, transfer, verifikasi publik)
+terhadap PostgreSQL sungguhan. **Gunakan database kosong khusus test: semua tabel dihapus setiap test.**
+
+```bash
+createdb terrafy_test
+DATABASE_URL=postgresql://postgres@localhost:5432/terrafy_test npx prisma db push
+TEST_DATABASE_URL=postgresql://postgres@localhost:5432/terrafy_test npm run test:integration
+```
+
+Database test harus memakai skema terbaru (`prisma db push` seperti di atas, ulangi setelah skema berubah).
+Tanpa `TEST_DATABASE_URL`, test integrasi otomatis di-skip.
+
+### Struktur Kode Inti
+
+| Lokasi | Isi |
+|---|---|
+| `src/lib/actions/*.ts` | Server action tipis: cek sesi, parsing input, panggil service |
+| `src/lib/certificates/*` | Logika bisnis (registrasi, transfer, approval, verifikasi, query) yang bisa diuji langsung |
+| `src/lib/steganography.ts` | Pembungkus `pngjs` (sisi server): decode/encode PNG dengan batas jumlah piksel |
+| `src/lib/seal/lsb.ts` | Tata letak bit LSB pada kanal RGB (format stabil, kompatibel dengan sertifikat lama), dipakai server dan browser |
+| `src/lib/seal/*` | Segel v2: `envelope`, `verify`, `public-keys`, `local-check`, `browser-reveal`, `png-header` aman dipakai di browser; `sign.ts` hanya untuk server (memegang kunci privat) |
+| `src/lib/certificates/{sealing,reissue}.ts` | Penerbitan segel bertanda tangan dan penerbitan ulang (v1, `kid` lama, atau `kid` dicabut) |
+| `src/lib/certificates/payload.ts` | Enkripsi AES-256-GCM + hash payload segel |
+| `src/lib/session.ts`, `src/lib/auth-guard.ts` | Cookie sesi bertanda tangan + otorisasi berbasis role di database |
 
 ## 👥 Tim Pengembang
 

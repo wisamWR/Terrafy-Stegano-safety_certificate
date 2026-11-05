@@ -118,6 +118,10 @@ model SteganographyMetadata {
   // Metadata Kriptografi
   encryptionAlgo String? @map("encryption_algo") @db.VarChar(50) // AES, RSA, etc.
   hashValue      String? @map("hash_value") @db.VarChar(128) // Hash untuk verifikasi integritas
+  // Seal v2 (Ed25519). Old rows stay version 1 without signature.
+  sealVersion    Int     @default(1) @map("seal_version")
+  signingKeyId   String? @map("signing_key_id") @db.VarChar(64)
+  signature      String? @db.VarChar(128)
 
   // Audit Trail
   createdBy    String    @map("created_by")

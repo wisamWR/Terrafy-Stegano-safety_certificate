@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowLeft, CheckCircle, XCircle, FileText, User, Calendar, History, ZoomIn, X, Upload, ShieldCheck, ShieldAlert, MapPin, Loader2, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator"
 import Image from "next/image"
 
 import { verifyCertificateImage } from "@/lib/actions/certificates";
+import { LocalSealCheck } from "@/components/LocalSealCheck";
 import {
     Dialog,
     DialogContent,
@@ -30,14 +31,70 @@ interface Certificate {
     isOwnerMatch?: boolean;
     imageOwnerName?: string;
     status: string;
-    transferToEmail?: string | null;
+    seal?: { version: 1 | 2; signed: boolean; kid?: string; issuedAt?: string };
     history: {
         name: string;
-        email: string;
+        email: string | null;
         type: string;
         date: string;
-        note: string;
+        note: string | null;
     }[];
+}
+
+type HeaderTone = "emerald" | "amber" | "blue" | "red"
+
+const HEADER_TONES: Record<HeaderTone, { box: string; icon: string; title: string; subtitle: string; badge: string }> = {
+    emerald: { box: "bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_15px_-5px_rgba(16,185,129,0.2)]", icon: "bg-emerald-500", title: "text-emerald-900 dark:text-emerald-200", subtitle: "text-emerald-700 dark:text-emerald-300", badge: "bg-emerald-600 text-white" },
+    amber: { box: "bg-amber-500/10 border-amber-400/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.2)]", icon: "bg-amber-500", title: "text-amber-900 dark:text-amber-200", subtitle: "text-amber-700 dark:text-amber-300", badge: "bg-amber-600 text-white" },
+    blue: { box: "bg-blue-500/10 border-blue-400/30 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)]", icon: "bg-blue-500", title: "text-blue-900 dark:text-blue-200", subtitle: "text-blue-700 dark:text-blue-300", badge: "bg-blue-600 text-white" },
+    red: { box: "bg-red-500/10 border-red-400/30 shadow-[0_0_15px_-5px_rgba(239,68,68,0.2)]", icon: "bg-red-500", title: "text-red-900 dark:text-red-200", subtitle: "text-red-700 dark:text-red-300", badge: "bg-red-600 text-white" },
+}
+
+function headerState(result: Certificate): { tone: HeaderTone; title: string; subtitle: string; badge: string } {
+    if (result.status === "REJECTED") {
+        return { tone: "red", title: "Sertifikat Tidak Berlaku", subtitle: "⛔ Segel asli, tetapi sertifikat ini telah dicabut/ditolak menurut data terkini.", badge: "Revoked" }
+    }
+    if (!result.isOwnerMatch) {
+        return { tone: "amber", title: "Segel Tidak Terbaru", subtitle: "⚠️ Gambar ini bukan segel terbaru (pindah tangan atau segel telah diperbarui).", badge: "Outdated" }
+    }
+    if (result.status === "TRANSFER_PENDING" || result.status === "AWAITING_RECIPIENT") {
+        return {
+            tone: "blue",
+            title: "Proses Pengalihan Hak",
+            subtitle: "ℹ️ Sertifikat ini sedang dalam proses transfer kepemilikan.",
+            badge: result.status === "TRANSFER_PENDING" ? "Transfer Pending" : "Awaiting Recipient",
+        }
+    }
+    return { tone: "emerald", title: "Sertifikat Valid & Asli", subtitle: "✅ Selamat! Integritas data digital terverifikasi sepenuhnya.", badge: "Verified" }
+}
+
+
+type NotCurrentTone = "red" | "amber"
+
+const NOT_CURRENT_TONES: Record<NotCurrentTone, { cardBorder: string; box: string; icon: string; advice: string }> = {
+    red: { cardBorder: "border-red-300/50", box: "bg-red-500/15 border-2 border-red-400/50 text-red-950", icon: "bg-red-500", advice: "border-red-300/50" },
+    amber: { cardBorder: "border-amber-300/50", box: "bg-amber-500/15 border-2 border-amber-400/50 text-amber-950", icon: "bg-amber-500", advice: "border-amber-300/50" },
+}
+
+function notCurrentCopy(status: string | undefined): { tone: NotCurrentTone; chip: string; badge: string; heading: string; text: string; advice: string | null } {
+    if (status === "REJECTED") {
+        return {
+            tone: "red",
+            chip: "Revoked",
+            badge: "REVOKED",
+            heading: "Sertifikat Telah Dicabut",
+            text: "Segel pada gambar ini asli, tetapi sertifikat sudah tidak berlaku menurut data terkini.",
+            advice: null,
+        }
+    }
+    return {
+        tone: "amber",
+        chip: "Outdated",
+        badge: "OUTDATED",
+        heading: "Segel Tidak Terbaru",
+        text: "Gambar ini bukan segel terbaru sertifikat ini (kepemilikan berpindah atau segel telah diperbarui). Data pemilik terkini dilindungi.",
+        advice: "Saran: Mintalah salinan sertifikat terbaru dari pemegang hak saat ini.",
+    }
 }
 
 export default function VerificationPage() {
@@ -46,13 +103,31 @@ export default function VerificationPage() {
     const [errorMessage, setErrorMessage] = useState<string>("");
     const [imageZoomOpen, setImageZoomOpen] = useState(false);
     const [result, setResult] = useState<Certificate | null>(null);
+    const copy = notCurrentCopy(result?.status);
+    const notCurrentTone = NOT_CURRENT_TONES[copy.tone];
 
-    // Create object URL for the uploaded file to display it
-    const fileUrl = file ? URL.createObjectURL(file) : null;
+    // Object URL for previewing the uploaded file; created in the change handler, revoked on replace/unmount
+    const [fileUrl, setFileUrl] = useState<string | null>(null);
+    const fileUrlRef = useRef<string | null>(null);
+    // Incremented on every verify/file change so a stale online response can be ignored
+    const requestId = useRef(0);
+
+    useEffect(() => {
+        return () => {
+            if (fileUrlRef.current) URL.revokeObjectURL(fileUrlRef.current);
+        };
+    }, []);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            setFile(e.target.files[0])
+            const selected = e.target.files[0]
+            requestId.current += 1
+            if (fileUrlRef.current) URL.revokeObjectURL(fileUrlRef.current)
+            const url = URL.createObjectURL(selected)
+            fileUrlRef.current = url
+            setFileUrl(url)
+            setFile(selected)
+            setResult(null)
             setStatus("idle")
             setErrorMessage("")
         }
@@ -60,6 +135,7 @@ export default function VerificationPage() {
 
     const handleVerify = async () => {
         if (!file) return
+        const myRequest = ++requestId.current
         setStatus("loading")
         setResult(null);
         setErrorMessage("");
@@ -69,12 +145,14 @@ export default function VerificationPage() {
             formData.append("file", file);
 
             const response = await verifyCertificateImage(formData);
+            if (myRequest !== requestId.current) return;
 
             if (response.success && response.certificate) {
                 setResult({
                     ...response.certificate,
                     isOwnerMatch: response.isOwnerMatch,
-                    imageOwnerName: response.imageOwnerName
+                    imageOwnerName: response.imageOwnerName,
+                    seal: response.seal
                 });
                 setStatus("success");
             } else {
@@ -82,6 +160,7 @@ export default function VerificationPage() {
                 setErrorMessage(response.error || "Gagal memverifikasi sertifikat.");
             }
         } catch (error) {
+            if (myRequest !== requestId.current) return;
             console.error("Verification error:", error);
             setStatus("error");
             setErrorMessage("Terjadi kesalahan sistem.");
@@ -154,13 +233,15 @@ export default function VerificationPage() {
                                 ) : (
                                     <>
                                         <ShieldCheck className="h-6 w-6" />
-                                        Verifikasi
+                                        Cek Status Online
                                     </>
                                 )}
                             </Button>
                         </div>
                     </CardContent>
                 </Card>
+
+                {file && <LocalSealCheck file={file} />}
 
                 {/* Error State */}
                 {status === "error" && (
@@ -186,46 +267,33 @@ export default function VerificationPage() {
                 {status === "success" && result && (
                     <div className="animate-in fade-in slide-in-from-bottom-6 space-y-8 pb-20">
                         {/* Header Status - SLIM VERSION */}
-                        <div className={`rounded-xl p-5 flex flex-col md:flex-row items-center justify-between border shadow-glass backdrop-blur-md ${!result.isOwnerMatch
-                            ? "bg-amber-500/10 border-amber-400/30 shadow-[0_0_15px_-5px_rgba(245,158,11,0.2)]"
-                            : "bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_15px_-5px_rgba(16,185,129,0.2)]"
-                            }`}>
-                            <div className="flex items-center gap-4 mb-3 md:mb-0">
-                                <div className={`p-2.5 rounded-xl shadow-md border border-white/20 ${!result.isOwnerMatch ? "bg-amber-500" : "bg-emerald-500"}`}>
-                                    {!result.isOwnerMatch ? <ShieldAlert className="h-6 w-6 text-white" /> : <ShieldCheck className="h-6 w-6 text-white" />}
+                        {(() => {
+                            const header = headerState(result)
+                            const tone = HEADER_TONES[header.tone]
+                            return (
+                                <div className={`rounded-xl p-5 flex flex-col md:flex-row items-center justify-between border shadow-glass backdrop-blur-md ${tone.box}`}>
+                                    <div className="flex items-center gap-4 mb-3 md:mb-0">
+                                        <div className={`p-2.5 rounded-xl shadow-md border border-white/20 ${tone.icon}`}>
+                                            {header.tone === "emerald" ? <ShieldCheck className="h-6 w-6 text-white" /> : <ShieldAlert className="h-6 w-6 text-white" />}
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            <h2 className={`text-xl font-bold tracking-tight ${tone.title}`}>{header.title}</h2>
+                                            <p className={`text-sm font-semibold opacity-90 ${tone.subtitle}`}>{header.subtitle}</p>
+                                            {result.seal && (
+                                                <p className="text-xs text-slate-600 dark:text-slate-400">
+                                                    {result.seal.signed
+                                                        ? `Segel v2 · ditandatangani digital (kunci ${result.seal.kid})`
+                                                        : "Segel lama v1 · tanpa tanda tangan digital"}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className={`px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.2em] shadow-sm ${tone.badge}`}>
+                                        {header.badge}
+                                    </div>
                                 </div>
-                                <div className="space-y-0.5">
-                                    <h2 className={`text-xl font-bold tracking-tight ${result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                        ? "text-blue-900 dark:text-blue-200"
-                                        : !result.isOwnerMatch ? "text-amber-900 dark:text-amber-200" : "text-emerald-900 dark:text-emerald-200"
-                                        }`}>
-                                        {result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                            ? "Proses Pengalihan Hak"
-                                            : !result.isOwnerMatch ? "Sertifikat Pindah Tangan" : "Sertifikat Valid & Asli"}
-                                    </h2>
-                                    <p className={`text-sm font-semibold opacity-90 ${result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                        ? "text-blue-700 dark:text-blue-300"
-                                        : !result.isOwnerMatch ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"
-                                        }`}>
-                                        {result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                            ? "ℹ️ Sertifikat ini sedang dalam proses transfer kepemilikan."
-                                            : !result.isOwnerMatch
-                                                ? "⚠️ Peringatan: Data fisik gambar (stego) sudah lama."
-                                                : "✅ Selamat! Integritas data digital terverifikasi sepenuhnya."}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className={`px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.2em] shadow-sm ${result.status === 'TRANSFER_PENDING' || result.status === 'AWAITING_RECIPIENT'
-                                ? "bg-blue-600 text-white"
-                                : !result.isOwnerMatch
-                                    ? "bg-amber-600 text-white"
-                                    : "bg-emerald-600 text-white"
-                                }`}>
-                                {result.status === 'TRANSFER_PENDING' ? "Transfer Pending"
-                                    : result.status === 'AWAITING_RECIPIENT' ? "Awaiting Recipient"
-                                        : !result.isOwnerMatch ? "Outdated" : "Verified"}
-                            </div>
-                        </div>
+                            )
+                        })()}
 
                         <div className="grid gap-8 md:grid-cols-3">
                             {/* Left Column (2/3): Image & Info */}
@@ -268,7 +336,7 @@ export default function VerificationPage() {
                                 </Card>
 
                                 {/* Certificate Info Card */}
-                                <Card className={`glass-card border-white/50 shadow-glass-lg ${!result.isOwnerMatch ? "border-amber-300/50" : "border-emerald-300/50"}`}>
+                                <Card className={`glass-card border-white/50 shadow-glass-lg ${!result.isOwnerMatch ? notCurrentTone.cardBorder : "border-emerald-300/50"}`}>
                                     <CardHeader className="pb-4">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-3">
@@ -280,27 +348,28 @@ export default function VerificationPage() {
                                             {!result.isOwnerMatch && (
                                                 <div className="flex items-center gap-2 bg-red-100 text-red-700 px-3 py-1 rounded-full border border-red-200 text-xs font-bold animate-pulse shadow-sm">
                                                     <AlertCircle className="h-3.5 w-3.5" />
-                                                    OUTDATED DATA
+                                                    {copy.badge}
                                                 </div>
                                             )}
                                         </div>
                                     </CardHeader>
                                     <CardContent className="space-y-8">
                                         {!result.isOwnerMatch && (
-                                            <div className="rounded-xl bg-amber-500/15 border-2 border-amber-400/50 p-6 text-amber-950 shadow-sm animate-in zoom-in-95 duration-500">
+                                            <div className={`rounded-xl ${notCurrentTone.box} p-6 shadow-sm animate-in zoom-in-95 duration-500`}>
                                                 <div className="flex items-start gap-4">
-                                                    <div className="bg-amber-500 p-2 rounded-full shadow-md shrink-0">
+                                                    <div className={`${notCurrentTone.icon} p-2 rounded-full shadow-md shrink-0`}>
                                                         <ShieldAlert className="h-5 w-5 text-white" />
                                                     </div>
                                                     <div>
-                                                        <p className="font-bold text-lg leading-tight uppercase tracking-tight">Ketidaksesuaian Kepemilikan Terdeteksi</p>
+                                                        <p className="font-bold text-lg leading-tight uppercase tracking-tight">{copy.heading}</p>
                                                         <p className="text-sm mt-2 font-medium leading-relaxed opacity-90">
-                                                            Data yang tertanam dalam gambar ini mencatat <b className="text-amber-900 h-px bg-amber-200">{result.imageOwnerName}</b> sebagai pemilik.
-                                                            Namun, sesuai <b className="text-blue-900">Database Real-time</b>, hak milik sah saat ini dipegang oleh <b className="text-emerald-900">{result.ownerName}</b>.
+                                                            {copy.text}
                                                         </p>
-                                                        <div className="mt-4 p-3 bg-white/40 rounded-lg text-xs font-semibold italic border border-amber-300/50">
-                                                            Saran: Mintalah salinan sertifikat terbaru dari pemegang hak saat ini.
-                                                        </div>
+                                                        {copy.advice && (
+                                                            <div className={`mt-4 p-3 bg-white/40 rounded-lg text-xs font-semibold italic border ${notCurrentTone.advice}`}>
+                                                                {copy.advice}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -317,7 +386,7 @@ export default function VerificationPage() {
                                             </div>
                                             <div className="space-y-0.5 group">
                                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] group-hover:text-blue-500 transition-colors">Luas Tanah</label>
-                                                <p className="font-bold text-lg text-slate-900 dark:text-slate-100">{result.luas} <span className="text-xs font-medium text-slate-400">m²</span></p>
+                                                <p className="font-bold text-lg text-slate-900 dark:text-slate-100">{result.luas}</p>
                                             </div>
                                             <div className="space-y-0.5 group">
                                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] group-hover:text-blue-500 transition-colors">Lokasi Properti</label>
@@ -361,7 +430,7 @@ export default function VerificationPage() {
                                                             </div>
                                                             <p className="text-lg font-bold text-red-700">{result.imageOwnerName}</p>
                                                             <div className="text-[10px] font-bold text-red-500 mt-2 flex items-center gap-1.5 uppercase tracking-tight bg-white/40 w-fit px-2.5 py-1 rounded-full border border-red-200/50">
-                                                                <AlertCircle className="h-2.5 w-2.5" /> Outdated
+                                                                <AlertCircle className="h-2.5 w-2.5" /> {copy.chip}
                                                             </div>
                                                         </div>
                                                     )}

@@ -11,7 +11,7 @@ Dokumentasi ini mencakup detail fitur, alur pengguna, dan penjelasan teknis mend
 #### A. FITUR USER (Role: USER)
 1. **Authentication**
    - Register akun baru
-   - Login (Session based via Cookie)
+   - Login (cookie sesi bertanda tangan JWT HS256, httpOnly; role selalu dicek ulang ke database)
    - Logout
    - **Status**: ✅ Implemented
 
@@ -189,7 +189,7 @@ Berbeda dengan asumsi awal (API Routes), aplikasi ini menggunakan **Next.js Serv
 3. **AES-256-GCM Encryption**:
    Mengenkripsi payload JSON agar tidak bisa dibaca begitu saja jika diekstrak.
    ```typescript
-   const key = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+   const key = Buffer.from(process.env.STEGANOGRAPHY_KEY, 'hex');
    const iv = crypto.randomBytes(12); // Initialization Vector
    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
    

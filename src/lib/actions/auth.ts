@@ -1,9 +1,12 @@
 "use server"
 
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 import bcrypt from "bcryptjs"
 import prisma from "@/lib/prisma"
 import { Role } from "@prisma/client"
+import { SESSION_COOKIE, sessionCookieOptions, signSession, type SessionPayload } from "@/lib/session"
+import { getCurrentSession } from "@/lib/auth-guard"
+import { clearLoginFailures, loginRetryAfter, recordLoginFailure } from "@/lib/rate-limit"
 
 export async function registerUser(formData: any) {
     const { name, email, password } = formData
@@ -39,6 +42,9 @@ export async function registerUser(formData: any) {
     }
 }
 
+// Compared against when the email is unknown so response time does not reveal which emails exist.
+const DUMMY_HASH = "$2b$10$nSL61UazGOiZ/hPxasx9je5Zw.eKHekHU.dxyBtFP1LaNEH6rLazq"
+
 export async function loginUser(formData: any) {
     const { email, password } = formData
 
@@ -46,48 +52,38 @@ export async function loginUser(formData: any) {
         return { error: "Email dan password harus diisi" }
     }
 
+    const forwardedFor = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"
+    const limitKey = `${String(email).toLowerCase()}|${forwardedFor}`
+
+    const retryAfter = loginRetryAfter(limitKey)
+    if (retryAfter > 0) {
+        return { error: `Terlalu banyak percobaan login. Coba lagi dalam ${Math.ceil(retryAfter / 60)} menit.` }
+    }
+
     try {
         const user = await prisma.user.findUnique({
             where: { email },
         })
 
-        if (!user) {
-            console.log("[LOGIN FAIL] User not found for email:", email);
-            return { error: "Email atau password salah" }
-        }
-        
-        // DEBUG: Force log user object to check if 'image' exists at runtime
-        console.log("[LOGIN DEBUG] Full User Object:", JSON.stringify(user, null, 2));
+        const isMatch = await bcrypt.compare(String(password), user?.password ?? DUMMY_HASH).catch(() => false)
 
-        // Check password (bcrypt)
-        const isMatch = await bcrypt.compare(password, user.password).catch((err) => {
-            console.error("[LOGIN ERROR] Bcrypt compare error:", err);
-            return false;
-        })
-        const isPlainMatch = password === user.password
-
-        console.log("[LOGIN DEBUG] Password check - Bcrypt:", isMatch, "Plain:", isPlainMatch);
-
-        if (!isMatch && !isPlainMatch) {
-            console.log("[LOGIN FAIL] Password mismatch");
+        if (!user || !isMatch) {
+            recordLoginFailure(limitKey)
             return { error: "Email atau password salah" }
         }
 
-        // Set Session (simulated with Cookie for middleware)
-        const sessionData = {
+        clearLoginFailures(limitKey)
+
+        const sessionData: SessionPayload = {
             id: user.id,
             name: user.name,
             email: user.email,
             role: user.role,
-            image: (user as any).image // Cast to any to bypass potential stale type definition
+            image: user.image,
         }
 
-        // Use Next.js cookies (server side)
         const cookieStore = await cookies()
-        cookieStore.set("user_session", JSON.stringify(sessionData), {
-            path: "/",
-            maxAge: 60 * 60 * 24 * 7, // 1 week
-        })
+        cookieStore.set(SESSION_COOKIE, await signSession(sessionData), sessionCookieOptions)
 
         return { success: true, user: sessionData }
     } catch (error) {
@@ -98,19 +94,10 @@ export async function loginUser(formData: any) {
 
 export async function logoutUser() {
     const cookieStore = await cookies()
-    cookieStore.delete("user_session")
+    cookieStore.delete(SESSION_COOKIE)
     return { success: true }
 }
 
 export async function getSession() {
-    const cookieStore = await cookies()
-    const sessionCookie = cookieStore.get("user_session")
-    if (sessionCookie?.value) {
-        try {
-            return JSON.parse(sessionCookie.value)
-        } catch (e) {
-            return null
-        }
-    }
-    return null
+    return getCurrentSession()
 }

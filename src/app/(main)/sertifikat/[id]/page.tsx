@@ -12,7 +12,7 @@ import { TransferConfirmation } from "@/components/TransferConfirmation";
 import { DownloadButton } from "@/components/DownloadButton";
 import { OwnershipTimeline } from "@/components/OwnershipTimeline";
 import { cn } from "@/lib/utils";
-import { cookies } from "next/headers";
+import { getCurrentSession } from "@/lib/auth-guard";
 import { EditCertificateModal } from "@/components/EditCertificateModal";
 import { DeleteCertificateAction } from "@/components/DeleteCertificateAction";
 
@@ -20,9 +20,7 @@ export default async function CertificateDetailPage({ params }: { params: Promis
     const { id } = await params;
     const result = await getCertificateById(id);
 
-    const cookieStore = await cookies();
-    const sessionValue = cookieStore.get("user_session")?.value;
-    const session = sessionValue ? JSON.parse(sessionValue) : null;
+    const session = await getCurrentSession();
 
     if (!result.success || !result.certificate) {
         return (

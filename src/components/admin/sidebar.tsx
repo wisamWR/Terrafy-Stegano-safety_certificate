@@ -67,7 +67,7 @@ export function AdminSidebar({ className }: AdminSidebarProps) {
     useEffect(() => {
         getSession().then((session) => {
             if (session) {
-                setUser(session);
+                setUser({ name: session.name ?? "Admin", email: session.email, image: session.image ?? undefined });
             }
         });
     }, []);

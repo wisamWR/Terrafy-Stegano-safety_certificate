@@ -6,22 +6,17 @@ import bcrypt from "bcryptjs"
 import { writeFile, mkdir } from "fs/promises"
 import path from "path"
 import { revalidatePath } from "next/cache"
+import { getAuthUser } from "@/lib/auth-guard"
+import { SESSION_COOKIE, sessionCookieOptions, signSession, type SessionPayload } from "@/lib/session"
 
-// Helper to get current user ID
+// Authenticated user (role/identity re-read from DB)
 async function getCurrentUser() {
-    const cookieStore = await cookies()
-    const sessionValue = cookieStore.get("user_session")?.value
-    if (!sessionValue) return null
-    try {
-        return JSON.parse(sessionValue)
-    } catch {
-        return null
-    }
+    return getAuthUser()
 }
 
-// Helper to update session cookie
+// Re-issue the signed session cookie after profile changes
 async function updateSessionCookie(user: any) {
-    const sessionData = {
+    const sessionData: SessionPayload = {
         id: user.id,
         name: user.name,
         email: user.email,
@@ -29,10 +24,7 @@ async function updateSessionCookie(user: any) {
         image: user.image
     }
     const cookieStore = await cookies()
-    cookieStore.set("user_session", JSON.stringify(sessionData), {
-        path: "/",
-        maxAge: 60 * 60 * 24 * 7, // 1 week
-    })
+    cookieStore.set(SESSION_COOKIE, await signSession(sessionData), sessionCookieOptions)
 }
 
 export async function updateProfile(prevState: any, formData: FormData) {
@@ -73,14 +65,22 @@ export async function updateAvatar(prevState: any, formData: FormData) {
     }
 
     try {
+        // Only raster image types: files land in public/, so .html/.svg would be served as active content
+        const ALLOWED_TYPES: Record<string, string> = {
+            "image/jpeg": "jpg",
+            "image/png": "png",
+            "image/webp": "webp",
+        }
+        const ext = ALLOWED_TYPES[file.type]
+        if (!ext) return { error: "Format foto harus JPG, PNG, atau WebP" }
+        if (file.size > 2 * 1024 * 1024) return { error: "Ukuran foto maksimal 2 MB" }
+
         // Upload Logic (Local Storage)
         const buffer = Buffer.from(await file.arrayBuffer())
         const uploadDir = path.join(process.cwd(), "public", "uploads", "avatars")
         await mkdir(uploadDir, { recursive: true })
 
         const timestamp = Date.now()
-        // Simple extension extraction
-        const ext = file.name.split('.').pop() || 'jpg'
         const filename = `avatar_${session.id}_${timestamp}.${ext}`
         const filePath = path.join(uploadDir, filename)
 
@@ -213,7 +213,7 @@ export async function deleteAccount(password: string) {
         
         // Clear session
         const cookieStore = await cookies()
-        cookieStore.delete("user_session")
+        cookieStore.delete(SESSION_COOKIE)
 
         return { success: true }
     } catch (error) {

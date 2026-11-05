@@ -54,10 +54,14 @@ SUPABASE_SERVICE_ROLE_KEY="[isi-service-role-secret-anda]"
 # 4. KEAMANAN (Kriptografi)
 # Kunci AES-256 (Harus 32 bytes = 64 karakter Hex).
 # Contoh bisa generate di terminal: openssl rand -hex 32
-STEGANOGRAPHY_KEY="a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890"
+# JANGAN pakai contoh dari internet/dokumen: generate milik sendiri.
+STEGANOGRAPHY_KEY="[isi-hasil-openssl-rand-hex-32]"
 
-# Opsional: Jika error sertifikat SSL lokal
-NODE_TLS_REJECT_UNAUTHORIZED="0"
+# Penanda tangan cookie sesi login (minimal 32 karakter acak, WAJIB)
+SESSION_SECRET="[isi-hasil-openssl-rand-hex-32]"
+
+# Jangan set NODE_TLS_REJECT_UNAUTHORIZED=0 (mematikan verifikasi TLS seluruh proses).
+# Koneksi database sudah ditangani di src/lib/prisma.ts.
 ```
 
 ---

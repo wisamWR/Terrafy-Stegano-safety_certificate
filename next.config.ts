@@ -1,17 +1,13 @@
 import type { NextConfig } from "next";
 
-const nextConfig: any = {
+const nextConfig: NextConfig = {
   /* config options here */
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',
     },
   },
-  // Forced restart for prisma update
   reactCompiler: true,
-  typescript: {
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;
