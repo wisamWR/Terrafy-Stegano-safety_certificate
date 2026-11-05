@@ -386,7 +386,7 @@ export default function VerificationPage() {
                                             </div>
                                             <div className="space-y-0.5 group">
                                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] group-hover:text-blue-500 transition-colors">Luas Tanah</label>
-                                                <p className="font-bold text-lg text-slate-900 dark:text-slate-100">{result.luas} <span className="text-xs font-medium text-slate-400">m²</span></p>
+                                                <p className="font-bold text-lg text-slate-900 dark:text-slate-100">{result.luas}</p>
                                             </div>
                                             <div className="space-y-0.5 group">
                                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] group-hover:text-blue-500 transition-colors">Lokasi Properti</label>

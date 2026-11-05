@@ -111,7 +111,8 @@ export async function verifyCertificateImage(image: Buffer, storage: Certificate
         name: h.owner_name || h.actor_name,
         email: h.owner_email || h.actor_email,
         type: h.action,
-        date: h.createdAt.toLocaleDateString("id-ID"),
+        // Formatted on the server (UTC on Vercel); pin to WIB so it matches what users see elsewhere
+        date: h.createdAt.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" }),
         note: h.note,
     }))
 
